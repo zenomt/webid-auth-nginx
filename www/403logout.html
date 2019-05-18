@@ -1,0 +1,22 @@
+<title>403 Forbidden</title>
+<center><h1>403 Forbidden</h1></center>
+<hr/>
+<p>
+<center>You don't have permission for this resource. You can log out and try
+logging in again with a different identity to access this resource.</center>
+
+<p>
+
+<center>
+<form action="%%AUTH_URL%%logout" method="post" id="logout_form">
+	<input type="submit" value="log out and reload" />
+	<input type="hidden" name="orig_url" id="orig_url_field" />
+</form>
+</center>
+
+<script language="javascript">
+;
+window.onload = function() {
+	orig_url_field.value = document.location.href;
+};
+</script>

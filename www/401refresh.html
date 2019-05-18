@@ -1,0 +1,17 @@
+<title>401 Stale Credentials</title>
+<center><h1>401 Stale Credentials</h2></center>
+<hr/>
+<center>
+<form action="%%AUTH_URL%%refresh" method="post" id="refresh_form">
+	<input type="submit" value="refresh" />
+	<input type="hidden" name="orig_url" id="orig_url_field" />
+</form>
+</center>
+
+<script language="javascript">
+;
+window.onload = function() {
+	orig_url_field.value = document.location.href;
+	refresh_form.submit();
+};
+</script>
