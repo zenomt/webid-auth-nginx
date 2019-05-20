@@ -222,9 +222,11 @@ class AuthResource(resource.Resource):
 		if os.path.isdir(path):
 			return self.send_answer(request, 'not found', code=404)
 		content_type = mimetypes.guess_type(path)[0] or 'application/octet-stream'
+		other_headers = [('Access-Control-Expose-Headers', 'WWW-Authenticate'),
+				('Access-Control-Allow-Origin', request.getHeader('Origin') or '*')]
 		try:
 			with open(path, 'rb') as f:
-				return self.send_answer(request, f.read().replace('%%AUTH_URL%%', args.url), content_type=content_type, cache=cache)
+				return self.send_answer(request, f.read().replace('%%AUTH_URL%%', args.url), content_type=content_type, cache=cache, other_headers=other_headers)
 		except Exception as e:
 			# print traceback.format_exc()
 			pass
@@ -263,7 +265,7 @@ class AuthResource(resource.Resource):
 
 		def send_auth_answer(code, authMode=None):
 			other_headers = []
-			www_authenticate = ['Bearer realm="%s"' % (args.url, )]
+			www_authenticate = ['Bearer realm="%s", scope="openid webid"' % (args.url, )]
 			if request.session_webid:
 				other_headers.append(('User', request.session_webid))
 			if authMode:
@@ -559,8 +561,7 @@ class AuthResource(resource.Resource):
 	@inlineCallbacks
 	def answer_webid_pop(self, request):
 		yield succeed(None)
-		other_headers = [('Access-Control-Allow-Origin', request.getHeader('Origin') or '*'),
-			('Access-Control-Max-Age', '60')]
+		other_headers = [('Access-Control-Allow-Origin', request.getHeader('Origin') or '*')]
 		returnValue(self.send_answer(request, code=302, other_headers=other_headers, location='https://zenomt.zenomt.com/t.html#fragment'))
 
 	@asyncResponse
