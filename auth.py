@@ -35,7 +35,7 @@ import urllib2
 import urlparse
 
 from twisted.internet import reactor
-from twisted.internet.defer import inlineCallbacks, returnValue, Deferred
+from twisted.internet.defer import inlineCallbacks, returnValue, Deferred, succeed
 from twisted.python import log
 from twisted.web import resource, server
 from twisted.web.client import readBody, Agent, ContentDecoderAgent, FileBodyProducer, GzipDecoder, RedirectAgent
@@ -197,11 +197,13 @@ class AuthResource(resource.Resource):
 		path = '.' if parts.path.endswith('/') else parts.path + '/'
 		return urlparse.urljoin(url, path)
 
-	def send_answer(self, request, body='', code=200, content_type='text/plain', other_headers=[], cache=False):
+	def send_answer(self, request, body='', code=200, content_type='text/plain', other_headers=[], cache=False, location=None):
 		request.setResponseCode(code)
 		request.setHeader('Content-type', content_type)
 		request.setHeader('Content-length', len(body))
 		request.setHeader('Cache-control', 'max-age=300' if cache else 'no-cache, no-store')
+		if location:
+			request.setHeader('Location', location)
 		for h, v in other_headers:
 			request.setHeader(h, v)
 		request.write(body)
@@ -223,7 +225,7 @@ class AuthResource(resource.Resource):
 		try:
 			with open(path, 'rb') as f:
 				return self.send_answer(request, f.read().replace('%%AUTH_URL%%', args.url), content_type=content_type, cache=cache)
-		except:
+		except Exception as e:
 			# print traceback.format_exc()
 			pass
 		return self.send_answer(request, 'not found', code=404)
@@ -251,8 +253,8 @@ class AuthResource(resource.Resource):
 
 	def make_token_challenge(self, uri, request):
 		nonce = random_token()
-		db.cursor().execute("INSERT INTO token_challenge (nonce, path, origin) VALUES (?, ?, ?)",
-			(nonce, uri, request.getHeader("Origin")))
+		db.cursor().execute("INSERT INTO token_challenge (nonce, path) VALUES (?, ?)",
+			(nonce, uri))
 		return nonce
 
 	def answer_authcheck(self, request):
@@ -363,7 +365,7 @@ class AuthResource(resource.Resource):
 			rv = c.execute("SELECT * FROM issuer WHERE id = ?", (c.lastrowid, )).fetchone()
 			db.commit()
 			returnValue(rv)
-		except:
+		except Exception as e:
 			print traceback.format_exc()
 			db.rollback()
 			returnValue(None)
@@ -426,7 +428,7 @@ class AuthResource(resource.Resource):
 
 	def basic_answer_login(self, request, issuer, orig_url):
 		if not issuer:
-			return self.send_answer(request, 'problem with issuer', code=302, other_headers=[('Location', orig_url)])
+			return self.send_answer(request, 'problem with issuer', code=302, location=orig_url)
 
 		state_key = random_token()
 		nonce = self.nonce_from_state(state_key)
@@ -437,7 +439,7 @@ class AuthResource(resource.Resource):
 		db.cursor().execute("INSERT INTO auth_state (state_key, issuer, original_url) VALUES (?, ?, ?)", \
 				(state_key, issuer['id'], orig_url))
 
-		return self.send_answer(request, 'redirecting to issuer', code=302, other_headers=[('Location', location)])
+		return self.send_answer(request, 'redirecting to issuer', code=302, location=location)
 
 	@inlineCallbacks
 	def answer_login(self, request):
@@ -448,7 +450,7 @@ class AuthResource(resource.Resource):
 		if not orig_url:
 			returnValue(self.send_answer(request, 'missing orig_url', code=400))
 		if (not issuer_url) or (not issuer_url.startswith('https://')):
-			returnValue(self.send_answer(request, 'missing or unrecognized issuer_url', code=302, other_headers=[('Location', orig_url)]))
+			returnValue(self.send_answer(request, 'missing or unrecognized issuer_url', code=302, location= orig_url))
 		issuer_url = self.normalize_issuer(issuer_url)
 
 		issuer = db.cursor().execute("SELECT * FROM issuer WHERE issuer_url = ?", (issuer_url, )).fetchone()
@@ -541,7 +543,7 @@ class AuthResource(resource.Resource):
 
 		request.addCookie(self.COOKIE, request.session_row['cookie'], path="/", secure=True, httpOnly=True)
 		returnValue(self.send_answer(request, 'redirecting to original url', code=302,
-			other_headers=[ ('Location', state_issuer['original_url']) ]
+			location=state_issuer['original_url']
 		))
 
 	def answer_logout(self, request):
@@ -551,8 +553,15 @@ class AuthResource(resource.Resource):
 			db.cursor().execute("DELETE FROM session WHERE cookie = ?", (request.auth_cookie, ))
 		orig_url = self.get_safe_redirect(qparam(request.args, 'orig_url') or request.getHeader('Referer'))
 		if orig_url and 'POST' == request.method:
-			return self.send_answer(request, code=302, other_headers=[('Location', orig_url)])
+			return self.send_answer(request, code=302, location=orig_url)
 		return self.send_answer(request, 'logged out')
+
+	@inlineCallbacks
+	def answer_webid_pop(self, request):
+		yield succeed(None)
+		other_headers = [('Access-Control-Allow-Origin', request.getHeader('Origin') or '*'),
+			('Access-Control-Max-Age', '60')]
+		returnValue(self.send_answer(request, code=302, other_headers=other_headers, location='https://zenomt.zenomt.com/t.html#fragment'))
 
 	@asyncResponse
 	@inlineCallbacks
@@ -566,6 +575,13 @@ class AuthResource(resource.Resource):
 			db.rollback()
 			print traceback.format_exc()
 			self.send_answer(request, code=500)
+
+	def get_path(self, request):
+		urlParts = urlparse.urlparse(request.path)
+		path = urlParts.path
+		if path.startswith(urlPathPrefix):
+			path = path[len(urlPathPrefix):]
+		return path
 
 	def process_request(self, request):
 		try:
@@ -583,10 +599,7 @@ class AuthResource(resource.Resource):
 						(request.auth_cookie, )).fetchone() if request.auth_cookie else None
 				request.session_webid = request.session_row['webid'] if request.session_row else None
 
-			urlParts = urlparse.urlparse(request.path)
-			path = urlParts.path
-			if path.startswith(urlPathPrefix):
-				path = path[len(urlPathPrefix):]
+			path = self.get_path(request)
 
 			if   path == self.AUTHCHECK:
 				return self.answer_authcheck(request)
@@ -605,7 +618,7 @@ class AuthResource(resource.Resource):
 				return self.answer_file(request, path)
 
 			return self.send_answer(request, 'bad request', code=405)
-		except:
+		except Exception as e:
 			db.rollback()
 			print traceback.format_exc()
 			request.setResponseCode(500)
@@ -680,8 +693,7 @@ CREATE TABLE IF NOT EXISTS token_challenge (
 	created_on   INTEGER DEFAULT (strftime('%s', 'now')),
 	expires_on   INTEGER DEFAULT (strftime('%s', 'now', '+10 minutes')),
 	nonce        TEXT UNIQUE NOT NULL,
-	path         TEXT NOT NULL,
-	origin       TEXT
+	path         TEXT NOT NULL
 );
 
 """)
