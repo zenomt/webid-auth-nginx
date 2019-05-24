@@ -107,7 +107,7 @@ parser.add_argument('-l', '--session-lifetime', help="lifetime for sessions (def
 parser.add_argument('-t', '--token-lifetime', help="lifetime for access tokens (default %(default)s)", default=1800)
 parser.add_argument('-i', '--cleanup-interval', type=float, default=10.,
 	help="interval between database cleanup runs (default %(default).3f)")
-parser.add_argument('-r', '--max-refreshes', default=1,
+parser.add_argument('-r', '--max-refreshes', default=1, type=int,
 	help="maximum failed refreshes before requiring a login (default %(default)s)")
 parser.add_argument('--debug', action='store_true')
 parser.add_argument('url', help='my auth URL prefix')
@@ -149,7 +149,7 @@ def do_cleanup():
 		yield delay(args.cleanup_interval)
 
 class AuthResource(resource.Resource):
-	COOKIE = 'webid_auth_session'
+	COOKIE = 'webid_auth_session_' + binascii.hexlify(hashlib.sha512(args.url).digest()[:8])
 
 	AUTHCHECK = "authcheck"
 	LOGIN     = "login"
@@ -283,17 +283,18 @@ class AuthResource(resource.Resource):
 			return send_auth_answer(401, authMode=self.MODE_TOKEN)
 		elif '/testauth/ok.html' == uri:
 			return send_auth_answer(200)
+		elif status == self.STATUS_STALE:
+			return send_auth_answer(401, authMode=self.MODE_REFRESH)
 		elif '/testauth/check.html' == uri:
 			if status == self.STATUS_OK:
 				return send_auth_answer(200)
-			elif status == self.STATUS_NONE:
-				return send_auth_answer(401)
-			elif status == self.STATUS_STALE:
-				return send_auth_answer(401, authMode=self.MODE_REFRESH)
-		elif '/testauth/notyou.html' == uri:
 			if status == self.STATUS_NONE:
 				return send_auth_answer(401)
-			return send_auth_answer(403, authMode=self.MODE_LOGOUT)
+		elif '/testauth/notyou.html' == uri:
+			if status == self.STATUS_OK:
+				return send_auth_answer(403, authMode=self.MODE_LOGOUT)
+			if status == self.STATUS_NONE:
+				return send_auth_answer(401)
 
 		return send_auth_answer(403)
 
@@ -379,7 +380,9 @@ class AuthResource(resource.Resource):
 	def load_graph(self, url):
 		response, body = yield self.get_url(url)
 		rv = rdflib.Graph()
-		rv.parse(data=body, format=response.headers.getRawHeaders("content-type", [None])[0], publicID=url)
+		content_type = response.headers.getRawHeaders("content-type", [None])[0]
+		content_type = re.split(r' *; *', content_type)[0] if content_type else None
+		rv.parse(data=body, format=content_type, publicID=url)
 		returnValue(rv)
 
 	@inlineCallbacks
