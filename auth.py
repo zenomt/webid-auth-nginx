@@ -44,7 +44,41 @@ from twisted.web.http_headers import Headers
 
 
 RANDOM_TOKEN_LENGTH = 30
-OIDC_P = rdflib.URIRef('http://www.w3.org/ns/solid/terms#oidcIssuer')
+
+ACL_MODE           = rdflib.URIRef('http://www.w3.org/ns/auth/acl#mode')
+ACL_APP            = rdflib.URIRef('http://www.w3.org/ns/auth/acl#app')
+ACL_ORIGIN         = rdflib.URIRef('http://www.w3.org/ns/auth/acl#origin')
+ACL_DEFAULT        = rdflib.URIRef('http://www.w3.org/ns/auth/acl#default')
+ACL_AGENT          = rdflib.URIRef('http://www.w3.org/ns/auth/acl#agent')
+ACL_AGENTCLASS     = rdflib.URIRef('http://www.w3.org/ns/auth/acl#agentClass')
+ACL_AGENTGROUP     = rdflib.URIRef('http://www.w3.org/ns/auth/acl#agentGroup')
+ACL_AUTHORIZATION  = rdflib.URIRef('http://www.w3.org/ns/auth/acl#Authorization')
+ACL_READ           = rdflib.URIRef('http://www.w3.org/ns/auth/acl#Read')
+ACL_WRITE          = rdflib.URIRef('http://www.w3.org/ns/auth/acl#Write')
+ACL_APPEND         = rdflib.URIRef('http://www.w3.org/ns/auth/acl#Append')
+ACL_CONTROL        = rdflib.URIRef('http://www.w3.org/ns/auth/acl#Control')
+ACL_OTHER          = rdflib.URIRef('http://www.w3.org/ns/auth/acl#Other')
+FOAF_AGENT         = rdflib.URIRef('http://xmlns.com/foaf/0.1/Agent')
+SOLID_OIDCISSUER   = rdflib.URIRef('http://www.w3.org/ns/solid/terms#oidcIssuer')
+VCARD_HASMEMBER    = rdflib.URIRef('http://www.w3.org/2006/vcard/ns#hasMember')
+
+DEFAULT_NS = {
+	"foaf": rdflib.URIRef('http://xmlns.com/foaf/0.1/'),
+	"acl": rdflib.URIRef('http://www.w3.org/ns/auth/acl#'),
+	"solid": rdflib.URIRef('http://www.w3.org/ns/solid/terms#'),
+	"vcard": rdflib.URIRef('http://www.w3.org/2006/vcard/ns#')
+}
+
+DEFAULT_NS_TTL = """
+@prefix acl: <http://www.w3.org/ns/auth/acl#> .
+@prefix foaf: <http://xmlns.com/foaf/0.1/> .
+@prefix solid: <http://www.w3.org/ns/solid/terms#> .
+@prefix vcard: <http://www.w3.org/2006/vcard/ns#> .
+"""
+
+METHODS_READ   = ["OPTIONS", "GET", "HEAD", "TRACE", "PROPFIND"]
+METHODS_WRITE  = ["PUT", "POST", "DELETE", "PATCH", "PROPPATCH", "MKCOL", "COPY", "MOVE", "LOCK", "UNLOCK"]
+METHODS_APPEND = ["PUT", "POST", "PATCH", "PROPPATCH", "MKCOL"]
 
 inf = float('inf')
 
@@ -71,6 +105,9 @@ def urlencode(query):
 			rv.append('%s=%s' % (urllib.quote_plus(str(k)), urllib.quote(str(v), '')))
 	return '&'.join(rv)
 
+def compact_json(obj):
+	return json.dumps(obj, indent=None, separators=(',', ':'))
+
 def b64u_sha512(msg):
 	return b64u_encode(hashlib.sha512(msg).digest())
 
@@ -94,13 +131,34 @@ def delay(interval):
 def bytesProducer(b):
 	return FileBodyProducer(io.BytesIO(b))
 
+def canonical_origin_parsed(urlparts):
+	scheme = urlparts.scheme.lower()
+	port = urlparts.port or { 'http':80, 'https':443 }.get(scheme, None)
+	return ('%s://%s:%s' % (scheme, urlparts.hostname or '', port)).lower()
+
+def canonical_origin(uri):
+	return canonical_origin_parsed(urlparse.urlparse(uri))
+
+def load_local_graph(path, publicID):
+	try:
+		if args.debug:
+			print "loading", path
+		rv = rdflib.Graph()
+		rv.parse(data=DEFAULT_NS_TTL + open(path, 'rb').read(), format='turtle', publicID=publicID)
+		return rv
+	except Exception as e:
+		print "error loading ACL <%s> (%s)" % (publicID, path)
+		raise e
+
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-p', '--port', type=int, default=8080, help='listen on port (default %(default)s)')
 parser.add_argument('-a', '--address', default="127.0.0.1",
 	help='listen on address (default %(default)s)')
-parser.add_argument('--data', default='./data',
-	help='directory for database and config file (default %(default)s)')
+parser.add_argument('-d', '--database', default='./data/storage.sqlite',
+	help='database file (default %(default)s)')
+parser.add_argument('-c', '--config-file', default='./data/config.json',
+	help='configuration file (default %(default)s)')
 parser.add_argument('--docroot', default='./www',
 	help='base directory for simple file server (default %(default)s)')
 parser.add_argument('-l', '--session-lifetime', help="lifetime for sessions (default %(default)s)", default=86400)
@@ -109,12 +167,13 @@ parser.add_argument('-i', '--cleanup-interval', type=float, default=10.,
 	help="interval between database cleanup runs (default %(default).3f)")
 parser.add_argument('-r', '--max-refreshes', default=1, type=int,
 	help="maximum failed refreshes before requiring a login (default %(default)s)")
+parser.add_argument('--acl-suffix', default='.acl',
+	help="filename suffix for access control files (default %(default)s)")
 parser.add_argument('--debug', action='store_true')
 parser.add_argument('url', help='my auth URL prefix')
 
 args = parser.parse_args()
 
-DBFILE = args.data + '/storage.sqlite'
 ISSUER_LIFETIME = args.session_lifetime * 2
 MAX_ISSUER_LIFETIME = 86400 * 180
 
@@ -124,10 +183,37 @@ if urlPathPrefix[-1] != '/':
 
 log.startLogging(sys.stdout)
 
-db = sqlite3.connect(DBFILE)
+db = sqlite3.connect(args.database)
 db.row_factory = sqlite3.Row
 
+# locations = [ { origin, prefix, root, base }, ... ]
+locations = []
+config_file = json.loads(open(args.config_file, 'rb').read())
+
 agent = ContentDecoderAgent(RedirectAgent(Agent(reactor)), [(b"gzip", GzipDecoder)])
+
+
+def prepare_locations():
+	for prefix, root in config_file['locations'].items():
+		urlparts = urlparse.urlparse(prefix)
+		origin = canonical_origin_parsed(urlparts)
+		prefix = urlparts.path
+		prefix = prefix if prefix[-1] == '/' else prefix + '/'
+		root = root if root[-1] == '/' else root + '/'
+		locations.append(dict(origin=origin, prefix=prefix, root=root, base=origin + prefix))
+	locations.sort(reverse=True, key=lambda x: x['prefix'].count('/'))
+
+def find_location(uri):
+	urlparts = urlparse.urlparse(uri)
+	origin = canonical_origin_parsed(urlparts)
+	path = posixpath.normpath(urlparts.path)
+	for each in locations:
+		prefix = each['prefix']
+		if each['origin'] == origin:
+			if (prefix == path[:len(prefix)]) or (prefix[:-1] == path):
+				rv = dict(path=path[len(prefix):])
+				rv.update(each)
+				return rv
 
 @inlineCallbacks
 def do_cleanup():
@@ -167,6 +253,11 @@ class AuthResource(resource.Resource):
 	STATUS_BAD_TOKEN = "bad token"
 	STATUS_NONE      = None
 
+	PERM_OK     = "ok"
+	PERM_AUTH   = "authenticate"
+	PERM_NOTYOU = "not you"
+	PERM_NONE   = None
+
 	isLeaf = True
 
 	def log_message(self, fmt, *s):
@@ -180,6 +271,9 @@ class AuthResource(resource.Resource):
 				authtype, val = fields
 				if authtype.lower() == header_type.lower():
 					return val
+
+	def get_client_addr(self, request):
+		return request.getHeader('X-Forwarded-For') or request.getClientAddress()
 
 	def get_bearer_auth(self, request):
 		return self.get_auth_header(request, 'Bearer')
@@ -232,6 +326,129 @@ class AuthResource(resource.Resource):
 			pass
 		return self.send_answer(request, 'not found', code=404)
 
+	def _auth_app_filter(self, sub, appid, app_origin, inherited, graph):
+		if inherited and ((sub, ACL_DEFAULT, None) not in graph):
+			return False
+		if appid: # None means no check needed
+			for obj in graph.objects(sub, ACL_ORIGIN):
+				obj = unicode(obj)
+				if ("*" == obj) or (canonical_origin(obj) == app_origin):
+					return True
+			for obj in graph.objects(sub, ACL_APP):
+				if appid.startswith(unicode(obj)):
+					return True
+			return False
+		return True
+
+	@inlineCallbacks
+	def check_acl_for_perm(self, acl, webid, appid, app_origin, permission, inherited=False):
+		initBindings = dict(perm=permission, webid=webid)
+		auth_app_filter = lambda x: self._auth_app_filter(x[0], appid, app_origin, inherited, acl)
+		filtered_query = lambda q: filter(auth_app_filter, acl.query(q, initNs=DEFAULT_NS, initBindings=initBindings))
+
+		if filtered_query("SELECT DISTINCT ?auth WHERE { ?auth a acl:Authorization; acl:agentClass foaf:Agent; acl:mode ?perm }"):
+			returnValue(self.PERM_OK)
+
+		if not webid:
+			if filtered_query("SELECT DISTINCT ?auth WHERE { ?auth a acl:Authorization; acl:mode ?perm }"):
+				returnValue(self.PERM_AUTH)
+			returnValue(self.PERM_NONE)
+
+		if filtered_query("SELECT DISTINCT ?auth WHERE { ?auth a acl:Authorization; acl:agentClass acl:AuthenticatedAgent; acl:mode ?perm }"):
+			returnValue(self.PERM_OK)
+
+		if filtered_query("SELECT DISTINCT ?auth WHERE { ?auth a acl:Authorization; acl:agent ?webid; acl:mode ?perm }"):
+			returnValue(self.PERM_OK)
+
+		for (auth, ) in filtered_query("SELECT DISTINCT ?auth WHERE { ?auth a acl:Authorization; acl:agentGroup ?g; acl:mode ?perm }"):
+			for group in acl.objects(auth, ACL_AGENTGROUP):
+				yield None # XXX make this function async, remove when it really is
+				print "XXX should check out group someday", unicode(group)
+				# try:
+				#	group_graph = load_graph_cached_shared_timeout(group)
+				#	if (group, VCARD_HASMEMBER, webid) in group_graph:
+				#		returnValue(self.PERM_OK)
+				# except Exception as e:
+				#	print "error loading group <%s>: %s" % (unicode(group), `e`)
+
+		if filtered_query("SELECT DISTINCT ?auth WHERE { ?auth a acl:Authorization; acl:mode ?perm }"):
+			returnValue(self.PERM_NOTYOU)
+
+		returnValue(self.PERM_NONE)
+
+	@inlineCallbacks
+	def check_permission(self, method, uri, webid, appid):
+		location = find_location(uri) # { origin, prefix, root, base, path }
+		if not location:
+			raise ValueError("missing configuration for <%s>" % (uri, ))
+		path = location['path'].split('/')
+		if posixpath.isdir(location['root'] + location['path']):
+			leaf = None
+		else:
+			leaf = path[-1]
+			path = path[:-1] or ['']
+		if path[0]:
+			path.insert(0, '')
+		lastACL = None
+		aclURI = location['base']
+		cachedReadable = False
+		current_dir = location['root']
+		app_origin = canonical_origin(appid) if appid else None
+
+		for dir_ in path:
+			current_dir = posixpath.join(current_dir, dir_ )
+			aclFilename = posixpath.join(current_dir, args.acl_suffix)
+			aclURI = urlparse.urljoin(aclURI, (dir_ or '.') + '/' + args.acl_suffix)
+			if posixpath.isfile(aclFilename):
+				cachedReadable = False
+				lastACL = load_local_graph(aclFilename, aclURI)
+				reason = yield self.check_acl_for_perm(lastACL, webid, appid, app_origin, ACL_READ)
+				if reason is not self.PERM_OK:
+					returnValue((reason, None))
+			elif not lastACL:
+				raise ValueError("missing root ACL (%s) <%s>?" % (aclFilename, aclURI))
+			elif not cachedReadable:
+				reason = yield self.check_acl_for_perm(lastACL, webid, appid, app_origin, ACL_READ, inherited=True)
+				if reason is not self.PERM_OK:
+					returnValue((reason, None))
+				cachedReadable = True
+
+		using_inherited = cachedReadable
+		need_control = False
+
+		if leaf:
+			if leaf.endswith(args.acl_suffix):
+				need_control = True
+			else:
+				leaf += args.acl_suffix
+			aclFilename = posixpath.join(current_dir, leaf)
+			aclURI = urlparse.urljoin(aclURI, leaf)
+			if posixpath.isfile(aclFilename):
+				lastACL = load_local_graph(aclFilename, aclURI)
+				using_inherited = False
+			else:
+				using_inherited = True
+
+		check_for = lambda perm: self.check_acl_for_perm(lastACL, webid, appid, app_origin, perm, inherited=using_inherited)
+
+		if   need_control:
+			mode = ACL_CONTROL
+			reason = yield check_for(ACL_CONTROL)
+		elif method in METHODS_READ:
+			mode = ACL_READ
+			reason = yield check_for(ACL_READ)
+		elif method in METHODS_WRITE:
+			mode = ACL_WRITE
+			reason = yield check_for(ACL_WRITE)
+			if (reason is not self.PERM_OK) and (method in METHODS_APPEND):
+				mode = ACL_APPEND
+				reason = yield check_for(ACL_APPEND)
+		else:
+			mode = ACL_OTHER
+			reason = yield check_for(ACL_OTHER)
+
+		returnValue((reason, unicode(mode)))
+
 	def check_auth_status(self, request):
 		access_token = self.get_bearer_auth(request)
 		if access_token:
@@ -255,19 +472,26 @@ class AuthResource(resource.Resource):
 
 	def make_token_challenge(self, uri, request):
 		nonce = random_token()
-		db.cursor().execute("INSERT INTO token_challenge (nonce, path) VALUES (?, ?)",
-			(nonce, uri))
+		db.cursor().execute("INSERT INTO token_challenge (nonce, uri, host) VALUES (?, ?, ?)",
+			(nonce, uri, self.get_client_addr(request)))
 		return nonce
 
+	@inlineCallbacks
 	def answer_authcheck(self, request):
-		status = self.check_auth_status(request)
 		uri = request.getHeader('X-Original-URI')
+		print "authcheck <%s>" % (uri, )
+		status = self.check_auth_status(request)
+		method = request.getHeader('X-Original-Method')
+		appid = request.access_token_row['appid'] if request.access_token_row else request.getHeader('Origin')
+		webid = rdflib.URIRef(request.session_webid) if status == self.STATUS_OK else None
 
-		def send_auth_answer(code, authMode=None):
+		def send_auth_answer(code, authMode=None, info=None):
 			other_headers = []
 			www_authenticate = ['Bearer realm="%s", scope="openid webid"' % (args.url, )]
-			if request.session_webid:
-				other_headers.append(('User', request.session_webid))
+			if webid:
+				other_headers.append(('User', webid))
+			if info:
+				other_headers.append(('X-Auth-Info', info))
 			if authMode:
 				other_headers.append(('X-Auth-Mode', authMode))
 				if not request.auth_cookie:
@@ -278,25 +502,18 @@ class AuthResource(resource.Resource):
 				other_headers.append(('WWW-Authenticate', ", ".join(www_authenticate)))
 			return self.send_answer(request, code=code, other_headers=other_headers)
 
-		# need real permission checking
 		if status == self.STATUS_BAD_TOKEN:
-			return send_auth_answer(401, authMode=self.MODE_TOKEN)
-		elif '/testauth/ok.html' == uri:
-			return send_auth_answer(200)
-		elif status == self.STATUS_STALE:
-			return send_auth_answer(401, authMode=self.MODE_REFRESH)
-		elif '/testauth/check.html' == uri:
-			if status == self.STATUS_OK:
-				return send_auth_answer(200)
-			if status == self.STATUS_NONE:
-				return send_auth_answer(401)
-		elif '/testauth/notyou.html' == uri:
-			if status == self.STATUS_OK:
-				return send_auth_answer(403, authMode=self.MODE_LOGOUT)
-			if status == self.STATUS_NONE:
-				return send_auth_answer(401)
+			returnValue(send_auth_answer(401, authMode=self.MODE_TOKEN))
 
-		return send_auth_answer(403)
+		perm, mode = yield self.check_permission(method, uri, webid, appid)
+
+		if perm == self.PERM_OK:
+			info = dict(webid=webid, appid=appid, mode=mode)
+			returnValue(send_auth_answer(200, info=b64u_encode(compact_json(info))))
+		elif perm == self.PERM_AUTH:
+			returnValue(send_auth_answer(401, authMode=self.MODE_REFRESH if status == self.STATUS_STALE else None))
+		else:
+			returnValue(send_auth_answer(403, authMode=self.MODE_LOGOUT if perm == self.PERM_NOTYOU else None))
 
 	@inlineCallbacks
 	def get_url(self, url, obj=None, query=None, basic_auth=None, bearer_auth=None):
@@ -379,6 +596,8 @@ class AuthResource(resource.Resource):
 	@inlineCallbacks
 	def load_graph(self, url):
 		response, body = yield self.get_url(url)
+		if 200 != response.code:
+			raise ValueError("unexpected response code %d" % (response.code, ))
 		rv = rdflib.Graph()
 		content_type = response.headers.getRawHeaders("content-type", [None])[0]
 		content_type = re.split(r' *; *', content_type)[0] if content_type else None
@@ -423,8 +642,8 @@ class AuthResource(resource.Resource):
 		webid_ref = rdflib.URIRef(webid)
 		issuer_ref = rdflib.URIRef(issuer_url)
 
-		if (webid_ref, OIDC_P, None) in card:
-			if (webid_ref, OIDC_P, issuer_ref) not in card:
+		if (webid_ref, SOLID_OIDCISSUER, None) in card:
+			if (webid_ref, SOLID_OIDCISSUER, issuer_ref) not in card:
 				raise ValueError("webid <%s> lists issuers but not <%s>" % (webid, issuer_url))
 		elif not webid_parts.hostname.endswith(issuer_parts.hostname):
 			raise ValueError("webid <%s> hostname is not a subdomain of issuer <%s> hostname" % (webid, issuer_url))
@@ -526,18 +745,18 @@ class AuthResource(resource.Resource):
 		now = long(time.time())
 		lifetime = max(10, min(args.session_lifetime, qparam(params, 'expires_in') or inf, claims.get('exp', inf) - now))
 		if request.session_row:
-			c.execute("UPDATE session SET updated_on = ?, expires_on = ?, checked_on = ?, " \
-					"refresh_count = 0, id_token = ?, access_token = ?, refresh_token = ?, id_expires_on = ?" \
+			c.execute("UPDATE session SET updated_on = ?, expires_on = ?, checked_on = ?, host = ?, " \
+					"refresh_count = 0, refresh_token = ?, id_expires_on = ?" \
 					"WHERE id = ?", \
-					(now, now + request.session_row['lifetime'], now, id_token, tokenAnswer.get('access_token'), \
+					(now, now + request.session_row['lifetime'], now, self.get_client_addr(request), \
 						tokenAnswer.get('refresh_token'), now + lifetime, request.session_row['id']))
 			self.log_message("update session for <%s>", webid)
 		else:
 			c.execute("INSERT INTO session "
-					"(expires_on, lifetime, cookie, issuer, webid, id_token, access_token, refresh_token, id_expires_on) " \
-					"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", \
+					"(expires_on, lifetime, cookie, issuer, host, webid, refresh_token, id_expires_on) " \
+					"VALUES (?, ?, ?, ?, ?, ?, ?, ?)", \
 					(now + args.session_lifetime, args.session_lifetime, random_token(), state_issuer['issuer_id'], \
-						webid, id_token, tokenAnswer.get('access_token'), tokenAnswer.get('refresh_token'), now + lifetime))
+						self.get_client_addr(request), webid, tokenAnswer.get('refresh_token'), now + lifetime))
 			request.session_row = c.execute("SELECT * FROM session WHERE id = ?", (c.lastrowid, )).fetchone()
 			request.session_webid = webid
 			self.log_message("create session for <%s>", webid)
@@ -606,7 +825,7 @@ class AuthResource(resource.Resource):
 			path = self.get_path(request)
 
 			if   path == self.AUTHCHECK:
-				return self.answer_authcheck(request)
+				return self.answer_async(self.answer_authcheck, request)
 			elif path == self.LOGIN:
 				return self.answer_async(self.answer_login, request)
 			elif path == self.REFRESH:
@@ -666,9 +885,8 @@ CREATE TABLE IF NOT EXISTS session (
 	cookie        TEXT UNIQUE NOT NULL,
 	issuer        INTEGER NOT NULL REFERENCES issuer(id) ON DELETE CASCADE,
 	refresh_count INTEGER DEFAULT 0,
+	host          TEXT,
 	webid         TEXT,
-	id_token      TEXT,
-	access_token  TEXT,
 	refresh_token TEXT,
 	id_expires_on INTEGER
 );
@@ -686,10 +904,10 @@ CREATE TABLE IF NOT EXISTS access_token (
 	id           INTEGER PRIMARY KEY AUTOINCREMENT,
 	created_on   INTEGER DEFAULT (strftime('%s', 'now')),
 	expires_on   INTEGER DEFAULT (strftime('%s', 'now', '+1 hour')),
+	host         TEXT,
 	access_token TEXT UNIQUE NOT NULL,
 	webid        TEXT NOT NULL,
-	origin       TEXT,
-	redirect_uri TEXT
+	appid        TEXT
 );
 
 CREATE TABLE IF NOT EXISTS token_challenge (
@@ -697,12 +915,17 @@ CREATE TABLE IF NOT EXISTS token_challenge (
 	created_on   INTEGER DEFAULT (strftime('%s', 'now')),
 	expires_on   INTEGER DEFAULT (strftime('%s', 'now', '+10 minutes')),
 	nonce        TEXT UNIQUE NOT NULL,
-	path         TEXT NOT NULL
+	uri          TEXT NOT NULL,
+	host         TEXT
 );
 
 """)
 
 db.commit()
+
+prepare_locations()
+if args.debug:
+	print "locations", locations
 
 do_cleanup() # async
 factory = server.Site(AuthResource(), logFormatter=proxiedLogFormatter)
