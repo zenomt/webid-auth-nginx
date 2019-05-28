@@ -1,7 +1,6 @@
-[]
+<#1>
 	a              acl:Authorization;
 	acl:agentClass acl:AuthenticatedAgent;
-	acl:mode       acl:Read, acl:Write, acl:Other, acl:Search;
+	acl:mode       acl:Read;
 	acl:origin     "*";
-	acl:accessTo   <./>;
 	acl:default    <./>.
