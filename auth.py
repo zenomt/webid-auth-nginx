@@ -689,7 +689,7 @@ class AuthResource(resource.Resource):
 
 	def answer_refresh(self, request):
 		if not request.session_row:
-			return self.answer_login(request)
+			return self.answer_async(self.answer_login, request)
 
 		params = request.args
 		orig_url = self.get_safe_redirect(qparam(params, 'orig_url') or request.getHeader('Referer'))
