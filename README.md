@@ -31,29 +31,26 @@ Web Access Control
 ------------------
 The server implements [Web Access Control][WAC] with a few modifications:
 
-  - the `acl`, `foaf`, `solid`, and `vcard` prefixes are pre-defined
+  - The `acl`, `foaf`, `solid`, and `vcard` prefixes are pre-defined for convenience;
   - `acl:Read` permission is required for every directory from the base prefix
-    on down to the location of the requested resource
+    down to the location of the requested resource;
   - `acl:Other` permission mode for any method that doesn't fall under
-    `acl:Read`, `acl:Write`, or `acl:Append`
-  - `acl:origin` objects can be URIs or string literals
-  - `acl:origin` can be the special literal `"*"`, which matches all origins
+    `acl:Read`, `acl:Write`, or `acl:Append`;
+  - `acl:origin` objects can be URIs or string literals;
+  - `acl:origin` can be the special literal `"*"`, which matches all origins;
   - `acl:app` for [application identifier][zenomt-auth] prefixes (only usable
     with [WebID Authorization Protocol][zenomt-auth] bearer tokens, not yet
-    implemented)
+    implemented).
 
-The permission modes are required to satisfy the following accesses:
+The following permission modes are required to satisfy the following accesses:
 
   - `acl:Control` for any access to a resource whose URL path part ends
-    with the acl suffix (by default `.acl`)
-
-  - `acl:Read` for methods `OPTIONS`, `GET`, `HEAD`, `TRACE`, `PROPFIND`
-
+    with the acl suffix (by default `.acl`);
+  - `acl:Read` for methods `OPTIONS`, `GET`, `HEAD`, `TRACE`, `PROPFIND`;
   - `acl:Write` for methods `PUT`, `POST`, `DELETE`, `PATCH`, `PROPPATCH`,
-    `MKCOL`, `COPY`, `MOVE`, `LOCK`, `UNLOCK`
-
+    `MKCOL`, `COPY`, `MOVE`, `LOCK`, `UNLOCK`;
   - `acl:Append` for methods `PUT`, `POST`, `PATCH`, `PROPPATCH`, `MKCOL`,
-    if `acl:Write` permission isn't granted
+    if `acl:Write` permission isn't granted.
 
 `auth.py`
 ---------
@@ -82,15 +79,58 @@ In addition, the server provides the following default HTML pages (located
 in the `www` directory) for logging in, refreshing, and forbidding access:
 
   - `401.html` -- The normal *Unauthorized* error page that prompts the user
-    to log in
+    to log in;
   - `401refresh.html` -- An error  page that causes the user's web browser
-     to refresh the user's credentials
+     to refresh the user's credentials;
   - `403.html` -- An error page for when access to the resource is completely
-    forbidden
+    forbidden;
   - `403logout.html` -- An error page for when access is forbidden, but where
-    an alternate login might provide access
+    an alternate login might provide access.
 
 ### `authcheck` API
+
+The `authcheck` endpoint is accessed with the `GET` method, and with some
+custom headers listed below. *nginx* ordinarily forwards the entire original
+request as-is, so a little re-writing is needed. See the configuration below.
+
+#### Request Headers
+
+  - `X-Original-URI` - The absolute request URI of the request being checked,
+    including scheme, host, port, and path. See the configuration below for
+    how to construct this from existing *nginx* variables;
+  - `X-Original-Method` - The method from the original request, needed because
+    this endpoint is accessed with `GET`;
+  - `X-Forwarded-For` - The IP address of the client making the request.
+  - All other headers from the original request, except that `Content-Length`
+    should be `0` or suppressed.
+
+#### Response Status
+
+  - `200` - Access permitted;
+  - `401` - Authorization required;
+  - `403` - Access forbidden;
+  - `500` - Any internal error, including misconfiguration or malformed
+    ACL files.
+
+#### Response Headers
+
+  - `User` - If set, the authenticated WebID of the requester. Intended to
+    allow the WebID to be logged in *nginx* log files if desired;
+  - `X-Auth-Mode` - If set, extra information for `401` or `403` responses;
+    Possible values are `refresh`, `token`, and `logout`. In the sample
+    configuration, this value is used to modify which `401` or `403` HTML
+    page is presented, to allow the user to log in, refresh a stale session,
+    log out and try a different identity, or be informed of an invalid access
+    token;
+  - `X-Auth-Info` - If set, extra information for `200` responses with
+    additional information about the client. Its value is a Base64-URL encoded
+    JSON object with the following keys:
+    - `webid` - The authenticated WebID (same as the `User` header);
+    - `appid` - The application identifier, which might be the `Origin`
+      header or an identifier associated with a `Bearer` access token;
+    - `mode` - The full URI of the Web Access Control permission mode
+      that was matched to grant access. This is to allow a downstream application
+      to tell the difference between `acl:Write` and `acl:Append`.
 
 ### Configuration
 
@@ -113,7 +153,9 @@ port `8080`, and using `data/config.json` for its configuration file:
 Use the `-h` option to to see additional command-line configuration parameters.
 
 Configure an *nginx* `proxy_pass` location for the `authcheck` endpoint. This
-endpoint requires a different configuration than the others:
+endpoint requires a different configuration than the others, in order to
+change the request method to `GET`, suppress the request body (if any), and
+set required API request headers:
 
 	server {
 	    server_name mike.example;
@@ -144,12 +186,14 @@ HTML pages:
 	    }
 	    ...
 
-If you don't already have a [CORS][] configuration and you want to support
-Cross-Origin Resource Sharing, you can create a `cors.conf` file to make it
-easier to add later on in different *nginx* configuration locations. For
-example (remember that any `add_header` directive in an *nginx* `location`
-or sub-`location` block clears all inherited `add_headers`):
+If you don't already have a [Cross-Origin Resource Sharing (CORS)][CORS]
+configuration and you want to add cross-origin support, you can create a
+`cors.conf` file to make it easier to add later on in different *nginx*
+configuration locations.  For example (remember that any `add_header` directive
+in an *nginx* `location` or sub-`location` block clears all inherited
+`add_headers`):
 
+	...
 	add_header Access-Control-Allow-Origin "$http_origin" always;
 	add_header Access-Control-Expose-Headers "Age,Content-Range,ETag,Link,Location,Vary,WWW-Authenticate" always;
 
@@ -160,19 +204,24 @@ or sub-`location` block clears all inherited `add_headers`):
 	    add_header Access-Control-Max-Age 60;
 	    return 204;
 	}
+	...
 
 Configure location(s) to use `auth.py` for authorization and access control, and to
 use `auth.py`'s HTML pages for `401` and `403` responses:
 
+	    ...
 	    location /wac {
 	        auth_request /auth/authcheck;
 	        auth_request_set $auth_mode $upstream_http_x_auth_mode;
 	        error_page 401 /auth/401$auth_mode.html;
 	        error_page 403 /auth/403$auth_mode.html;
-
-	        include cors.conf; # if you created one as above
+	
+	        # if you want to support CORS and created a file as above:
+	        include cors.conf;
+	
+	        # alternatively you can include CORS directives inline here.
 	    }
-
+	    ...
 
 
   [auth-module]: https://nginx.org/en/docs/http/ngx_http_auth_request_module.html
