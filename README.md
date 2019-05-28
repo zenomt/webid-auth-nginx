@@ -91,7 +91,8 @@ in the `www` directory) for logging in, refreshing, and forbidding access:
 
 The `authcheck` endpoint is accessed with the `GET` method, and with some
 custom headers listed below. *nginx* ordinarily forwards the entire original
-request as-is, so a little re-writing is needed. See the configuration below.
+request as-is (including method, but to the subrequest URI), so a little
+re-writing is needed. See the configuration below.
 
 #### Request Headers
 
@@ -102,7 +103,8 @@ request as-is, so a little re-writing is needed. See the configuration below.
     this endpoint is accessed with `GET`;
   - `X-Forwarded-For` - The IP address of the client making the request.
   - All other headers from the original request, except that `Content-Length`
-    should be `0` or suppressed.
+    should be `0` or suppressed. `authcheck` will look at the `Cookie`,
+    `Origin`, and `Authorization` headers.
 
 #### Response Status
 
@@ -128,9 +130,14 @@ request as-is, so a little re-writing is needed. See the configuration below.
     - `webid` - The authenticated WebID (same as the `User` header);
     - `appid` - The application identifier, which might be the `Origin`
       header or an identifier associated with a `Bearer` access token;
-    - `mode` - The full URI of the Web Access Control permission mode
+    - `mode` - The Web Access Control permission mode (full URI)
       that was matched to grant access. This is to allow a downstream application
-      to tell the difference between `acl:Write` and `acl:Append`.
+      to constrain the behavior of a write-like method if only
+      `http://www.w3.org/ns/auth/acl#Append` permission is granted.
+  - `WWW-Authenticate` - If set, the `WWW-Authenticate` header that should
+    be returned to the client with a `401` response. *nginx* automatically
+    includes this response header with a `401` response to the client, so it
+    doesn't need to be manually configured.
 
 ### Configuration
 
@@ -162,15 +169,15 @@ set required API request headers:
 	    ...
 
 	    location /auth/authcheck {
-	        internal;
-	        auth_request off;
+	        internal; # don't expose to the outside
+	        auth_request off; # don't get stuck in a loop
 	        proxy_method GET;
 	        proxy_pass_request_body off;
-	        proxy_set_header Content-length "";
+	        proxy_set_header Content-length ""; # since there's no request body
 	        proxy_pass http://127.0.0.1:8080;
 	        proxy_set_header X-Original-URI $scheme://$host:$server_port$request_uri;
-	        proxy_set_header X-Forwarded-For $remote_addr;
 	        proxy_set_header X-Original-Method $request_method;
+	        proxy_set_header X-Forwarded-For $remote_addr;
 	    }
 	    ...
 
@@ -212,14 +219,14 @@ use `auth.py`'s HTML pages for `401` and `403` responses:
 	    ...
 	    location /wac {
 	        auth_request /auth/authcheck;
-	        auth_request_set $auth_mode $upstream_http_x_auth_mode;
-	        error_page 401 /auth/401$auth_mode.html;
-	        error_page 403 /auth/403$auth_mode.html;
+	        auth_request_set $auth_mode $upstream_http_x_auth_mode; # extract x-auth-mode for 401/403 pages
+	        error_page 401 /auth/401$auth_mode.html; # select plain, refresh, or token flavor
+	        error_page 403 /auth/403$auth_mode.html; # select plain or logout flavor
 	
 	        # if you want to support CORS and created a file as above:
 	        include cors.conf;
 	
-	        # alternatively you can include CORS directives inline here.
+	        # alternatively you could include CORS directives inline here.
 	    }
 	    ...
 
