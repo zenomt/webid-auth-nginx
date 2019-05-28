@@ -1,0 +1,12 @@
+{
+	"locations": {
+		"https://mike.example/": "samples/root/",
+
+		"https://alice.example/": "/path/to/alice-root/",
+		"https://alice.example/apps/": "/path/to/apps-root/",
+		"https://alice.example/apps/app2": "/some/other/app-root/",
+
+		"https://bob.example:8443/": "/path/to/bob/alt"
+	},
+	"#": "matches are made by origin and then by most specific path prefix."
+}

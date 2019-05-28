@@ -1,7 +1,7 @@
 TODO
 ====
   - acl:agentGroup including:
-    * shared fetch per absolute URI
+    * shared fetch per absolute URI (don't cause infinite loops)
     * attempt for local fetch according to config, fallback to normal fetch
     * cache result, minimum time to check again, use If-None-Match
   - cache parsed ACL graphs, reload if modified

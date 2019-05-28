@@ -273,7 +273,7 @@ class AuthResource(resource.Resource):
 					return val
 
 	def get_client_addr(self, request):
-		return request.getHeader('X-Forwarded-For') or request.getClientAddress()
+		return request.getHeader('X-Forwarded-For') or request.getClientIP()
 
 	def get_bearer_auth(self, request):
 		return self.get_auth_header(request, 'Bearer')
@@ -479,9 +479,13 @@ class AuthResource(resource.Resource):
 	@inlineCallbacks
 	def answer_authcheck(self, request):
 		uri = request.getHeader('X-Original-URI')
+		if not uri:
+			raise ValueError("X-Original-URI header missing")
 		print "authcheck <%s>" % (uri, )
 		status = self.check_auth_status(request)
 		method = request.getHeader('X-Original-Method')
+		if not method:
+			raise ValueError("X-Original-Method header missing")
 		appid = request.access_token_row['appid'] if request.access_token_row else request.getHeader('Origin')
 		webid = rdflib.URIRef(request.session_webid) if status == self.STATUS_OK else None
 

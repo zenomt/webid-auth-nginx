@@ -1,0 +1,8 @@
+# this is an ACL has a read permission but there's no way to get it.
+# this should trigger the "you could try logging in as someone else"
+# response.
+
+<#1>
+	a              acl:Authorization;
+	acl:mode       acl:Read;
+	acl:origin     "*".

@@ -1,0 +1,13 @@
+<#1>
+	a              acl:Authorization;
+	acl:agentClass foaf:Agent;
+	acl:mode       acl:Read;
+
+	# any Origin/appID with this origin.
+	acl:origin     "https://app1.example" ;
+
+	# only apps with these appID (redirect URL) prefixes.
+	# for example, these would match https://app2.example/app2/oauth/code
+	# but not https://app2.example/app3/oauth/code .
+	acl:app        "https://app2.example/app2/oauth/" ;
+	acl:app        "https://app2.example/app4/oauth/" .
