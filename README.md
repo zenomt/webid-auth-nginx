@@ -51,6 +51,7 @@ The following permission modes are required to satisfy the following accesses:
     `MKCOL`, `COPY`, `MOVE`, `LOCK`, `UNLOCK`;
   - `acl:Append` for methods `PUT`, `POST`, `PATCH`, `PROPPATCH`, `MKCOL`,
     if `acl:Write` permission isn't granted.
+  - `acl:Other` for any other methods.
 
 `auth.py`
 ---------
