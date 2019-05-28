@@ -1,6 +1,6 @@
 WebID Authorization Server for nginx
 ====================================
-This is a [WebID-OIDC][] authorization and [Web Access Contro][WAC] server,
+This is a [WebID-OIDC][] authorization and [Web Access Control][WAC] server,
 intended to be used as an [nginx][] [authorization subrequest][auth-module]
 server.
 
@@ -16,7 +16,7 @@ and HTTP APIs behind a reverse proxy such as *nginx*.
 
 The server is currently incomplete. `acl:agentGroup` is not currently
 implemented. [WebID Authorization Protocol][zenomt-auth] support is planned
-but not yet available. See [TODO][TODO.md] for more information.
+but not yet available. See [TODO](TODO.md) for more information.
 
 ### Dependencies
 
