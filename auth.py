@@ -531,6 +531,8 @@ class AuthResource(resource.Resource):
 	@inlineCallbacks
 	def get_url(self, url, obj=None, query=None, basic_auth=None, bearer_auth=None):
 		try:
+			if args.debug:
+				print "get_url", url
 			headers = Headers()
 			requestBody = None
 			if obj:
@@ -583,11 +585,12 @@ class AuthResource(resource.Resource):
 			lifetime = max(60, min(ISSUER_LIFETIME, hard_expiration - now))
 			c = db.cursor()
 			c.execute("INSERT INTO issuer "
-					"(expires_on, hard_exp_on, lifetime, issuer_url, client_id, client_secret, userinfo_url, "
+					"(expires_on, hard_exp_on, lifetime, issuer_url, issuer_actual, client_id, client_secret, userinfo_url, "
 					"    auth_url, token_url, jwks_url, secret_post, secret_basic) "
-					"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (
+					"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (
 						now + lifetime, hard_expiration, lifetime,
 						issuer_url,
+						suburl(config.get('issuer')),
 						registration.get('client_id'), registration.get('client_secret'),
 						suburl(config.get('userinfo_endpoint')),
 						suburl(config.get('authorization_endpoint')),
@@ -622,11 +625,14 @@ class AuthResource(resource.Resource):
 		enc_header, enc_claims, enc_sig = raw_token.split('.')
 		claims = json.loads(b64u_decode(enc_claims))
 		webid = claims.get('webid') or claims.get('sub') or ''
-		issuer_url = issuer_row['issuer_url']
+		issuer_url = issuer_row['issuer_actual'] or issuer_row['issuer_url']
 		nonce = claims.get('nonce') or ''
 		webid_parts = urlparse.urlparse(webid)
 		issuer_parts = urlparse.urlparse(issuer_url)
 		my_client = issuer_row['client_id']
+
+		if args.debug:
+			print "check_id_token", raw_token
 
 		if not webid:
 			raise ValueError("id_token doesn't identify a webid")
@@ -878,6 +884,7 @@ CREATE TABLE IF NOT EXISTS issuer (
 	hard_exp_on   INTEGER DEFAULT (strftime('%s', 'now', '+2 days')),
 	lifetime      INTEGER DEFAULT 172800,
 	issuer_url    TEXT UNIQUE NOT NULL,
+	issuer_actual TEXT,
 	client_id     TEXT NOT NULL,
 	client_secret TEXT,
 	userinfo_url  TEXT,
