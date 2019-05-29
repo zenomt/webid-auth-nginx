@@ -289,9 +289,7 @@ class AuthResource(resource.Resource):
 
 	def get_safe_redirect(self, url):
 		url = urlparse.urljoin(args.url, url)
-		myparts = urlparse.urlparse(args.url)
-		parts = urlparse.urlparse(url)
-		if url.startswith(args.url) or ('https' != parts.scheme) or (myparts.hostname != parts.hostname):
+		if url.startswith(args.url) or not find_location(url):
 			return None
 		return url
 
