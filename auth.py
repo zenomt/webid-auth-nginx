@@ -148,15 +148,18 @@ def canonical_origin_parsed(urlparts):
 def canonical_origin(uri):
 	return canonical_origin_parsed(urlparse.urlparse(uri))
 
-def load_local_graph(path, publicID):
+def load_local_graph(path, publicID, format=None):
 	try:
 		if args.debug:
 			print "loading", path
 		rv = rdflib.Graph()
-		rv.parse(data=DEFAULT_NS_TTL + open(path, 'rb').read(), format='turtle', publicID=publicID)
+		format = format or rdflib.util.guess_format(path) or 'turtle'
+		data = DEFAULT_NS_TTL if format in ('turtle', 'n3') else ''
+		data += open(path, 'rb').read()
+		rv.parse(data=data, format=format, publicID=publicID)
 		return rv
 	except Exception as e:
-		print "error loading ACL <%s> (%s)" % (publicID, path)
+		print "error loading RDF <%s> (%s)" % (publicID, path)
 		raise e
 
 
@@ -195,7 +198,7 @@ log.startLogging(sys.stdout)
 db = sqlite3.connect(args.database)
 db.row_factory = sqlite3.Row
 
-# locations = [ { origin, prefix, root, base }, ... ]
+# locations = [ { canonical_origin, origin, prefix, root, base, }, ... ]
 locations = []
 config_file = json.loads(open(args.config_file, 'rb').read())
 
@@ -205,24 +208,34 @@ agent = ContentDecoderAgent(RedirectAgent(Agent(reactor)), [(b"gzip", GzipDecode
 def prepare_locations():
 	for prefix, root in config_file['locations'].items():
 		urlparts = urlparse.urlparse(prefix)
-		origin = canonical_origin_parsed(urlparts)
+		origin = urlparts.scheme + '://' + urlparts.netloc
+		canonical_origin = canonical_origin_parsed(urlparts)
 		prefix = urlparts.path
 		prefix = prefix if prefix[-1] == '/' else prefix + '/'
 		root = root if root[-1] == '/' else root + '/'
-		locations.append(dict(origin=origin, prefix=prefix, root=root, base=origin + prefix))
+		locations.append(dict(canonical_origin=canonical_origin, origin=origin, prefix=prefix, root=root, base=origin + prefix))
 	locations.sort(reverse=True, key=lambda x: x['prefix'].count('/'))
 
 def find_location(uri):
 	urlparts = urlparse.urlparse(uri)
-	origin = canonical_origin_parsed(urlparts)
+	canonical_origin = canonical_origin_parsed(urlparts)
 	path = posixpath.normpath(urlparts.path)
 	for each in locations:
 		prefix = each['prefix']
-		if each['origin'] == origin:
+		if each['canonical_origin'] == canonical_origin:
 			if (prefix == path[:len(prefix)]) or (prefix[:-1] == path):
 				rv = dict(path=path[len(prefix):])
 				rv.update(each)
 				return rv
+
+def try_find_local_graph(uri):
+	location = find_location(uri)
+	if location:
+		path = location['root'] + location['path']
+		if posixpath.isfile(path):
+			if args.debug:
+				print "trying to load local graph <%s> (%s)" % (uri, path)
+			return load_local_graph(path, uri)
 
 @inlineCallbacks
 def do_cleanup():
@@ -370,13 +383,13 @@ class AuthResource(resource.Resource):
 		for (auth, ) in filtered_query("SELECT DISTINCT ?auth WHERE { ?auth a acl:Authorization; acl:agentGroup ?g; acl:mode ?perm }"):
 			for group in acl.objects(auth, ACL_AGENTGROUP):
 				yield None # XXX make this function async, remove when it really is
-				print "XXX should check out group someday", unicode(group)
-				# try:
-				#	group_graph = load_graph_cached_shared_timeout(group)
-				#	if (group, VCARD_HASMEMBER, webid) in group_graph:
-				#		returnValue(self.PERM_OK)
-				# except Exception as e:
-				#	print "error loading group <%s>: %s" % (unicode(group), `e`)
+				try:
+					# XXX replace try_find_local_graph with load_graph_cached_shared_timeout_try_local
+					group_graph = try_find_local_graph(unicode(group))
+					if (group, VCARD_HASMEMBER, webid) in group_graph:
+						returnValue(self.PERM_OK)
+				except Exception as e:
+					print "error (ignored) loading group <%s>: %s" % (unicode(group), `e`)
 
 		if filtered_query("SELECT DISTINCT ?auth WHERE { ?auth a acl:Authorization; acl:mode ?perm }"):
 			returnValue(self.PERM_NOTYOU)
@@ -385,7 +398,7 @@ class AuthResource(resource.Resource):
 
 	@inlineCallbacks
 	def check_permission(self, method, uri, webid, appid):
-		location = find_location(uri) # { origin, prefix, root, base, path }
+		location = find_location(uri) # { origin, prefix, root, base, path, canonical_origin }
 		if not location:
 			raise ValueError("missing configuration for <%s>" % (uri, ))
 		path = location['path'].split('/')
@@ -408,7 +421,7 @@ class AuthResource(resource.Resource):
 			aclURI = urlparse.urljoin(aclURI, (dir_ or '.') + '/' + args.acl_suffix)
 			if posixpath.isfile(aclFilename):
 				cachedReadable = False
-				lastACL = load_local_graph(aclFilename, aclURI)
+				lastACL = load_local_graph(aclFilename, aclURI, format='turtle')
 				reason = yield self.check_acl_for_perm(lastACL, webid, appid, app_origin, ACL_READ)
 				if reason is not self.PERM_OK:
 					returnValue((reason, None))
@@ -431,7 +444,7 @@ class AuthResource(resource.Resource):
 			aclFilename = posixpath.join(current_dir, leaf)
 			aclURI = urlparse.urljoin(aclURI, leaf)
 			if posixpath.isfile(aclFilename):
-				lastACL = load_local_graph(aclFilename, aclURI)
+				lastACL = load_local_graph(aclFilename, aclURI, format='turtle')
 				using_inherited = False
 			else:
 				using_inherited = True
@@ -801,7 +814,7 @@ class AuthResource(resource.Resource):
 	def answer_webid_pop(self, request):
 		yield succeed(None)
 		other_headers = [('Access-Control-Allow-Origin', request.getHeader('Origin') or '*')]
-		returnValue(self.send_answer(request, code=302, other_headers=other_headers, location='https://zenomt.zenomt.com/t.html#fragment'))
+		returnValue(self.send_answer(request, code=501, other_headers=other_headers))
 
 	@asyncResponse
 	@inlineCallbacks
