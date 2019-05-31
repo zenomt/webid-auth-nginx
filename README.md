@@ -35,6 +35,7 @@ The server implements [Web Access Control][WAC] with a few modifications:
   - The `acl`, `foaf`, `solid`, and `vcard` prefixes are pre-defined for convenience;
   - `acl:Read` permission is required for every directory from the base prefix
     down to the location of the requested resource;
+  - `acl:Read` permission in an ACL file also grants read for that ACL file;
   - `acl:Other` permission mode for any method that doesn't fall under
     `acl:Read`, `acl:Write`, or `acl:Append`;
   - `acl:origin` objects can be URIs or string literals;
@@ -46,8 +47,10 @@ The server implements [Web Access Control][WAC] with a few modifications:
 The following permission modes are required to satisfy the following accesses:
 
   - `acl:Control` for any access to a resource whose URL path part ends
-    with the acl suffix (by default `.acl`);
+    with the ACL suffix (by default `.acl`);
   - `acl:Read` for methods `OPTIONS`, `GET`, `HEAD`, `TRACE`, `PROPFIND`;
+  - `acl:Read` for the above read methods on an ACL resource if `acl:Control`
+    isn't granted;
   - `acl:Write` for methods `PUT`, `POST`, `DELETE`, `PATCH`, `PROPPATCH`,
     `MKCOL`, `COPY`, `MOVE`, `LOCK`, `UNLOCK`;
   - `acl:Append` for methods `PUT`, `POST`, `PATCH`, `PROPPATCH`, `MKCOL`,

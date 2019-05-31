@@ -142,8 +142,12 @@ def bytesProducer(b):
 
 def canonical_origin_parsed(urlparts):
 	scheme = urlparts.scheme.lower()
-	port = urlparts.port or { 'http':80, 'https':443 }.get(scheme, None)
-	return ('%s://%s:%s' % (scheme, urlparts.hostname or '', port)).lower()
+	port = urlparts.port
+	if (not port) or (port == { 'http':80, 'https':443 }.get(scheme, None)):
+		port = ''
+	else:
+		port = ':%s' % (port, )
+	return ('%s://%s%s' % (scheme, urlparts.hostname or '', port)).lower()
 
 def canonical_origin(uri):
 	return canonical_origin_parsed(urlparse.urlparse(uri))
@@ -198,7 +202,7 @@ log.startLogging(sys.stdout)
 db = sqlite3.connect(args.database)
 db.row_factory = sqlite3.Row
 
-# locations = [ { canonical_origin, origin, prefix, root, base, }, ... ]
+# locations = [ { origin, prefix, root, base, }, ... ]
 locations = []
 config_file = json.loads(open(args.config_file, 'rb').read())
 
@@ -208,21 +212,20 @@ agent = ContentDecoderAgent(RedirectAgent(Agent(reactor)), [(b"gzip", GzipDecode
 def prepare_locations():
 	for prefix, root in config_file['locations'].items():
 		urlparts = urlparse.urlparse(prefix)
-		origin = urlparts.scheme + '://' + urlparts.netloc
-		canonical_origin = canonical_origin_parsed(urlparts)
+		origin = canonical_origin_parsed(urlparts)
 		prefix = urlparts.path
 		prefix = prefix if prefix[-1] == '/' else prefix + '/'
 		root = root if root[-1] == '/' else root + '/'
-		locations.append(dict(canonical_origin=canonical_origin, origin=origin, prefix=prefix, root=root, base=origin + prefix))
+		locations.append(dict(origin=origin, prefix=prefix, root=root, base=origin + prefix))
 	locations.sort(reverse=True, key=lambda x: x['prefix'].count('/'))
 
 def find_location(uri):
 	urlparts = urlparse.urlparse(uri)
-	canonical_origin = canonical_origin_parsed(urlparts)
+	origin = canonical_origin_parsed(urlparts)
 	path = posixpath.normpath(urlparts.path)
 	for each in locations:
 		prefix = each['prefix']
-		if each['canonical_origin'] == canonical_origin:
+		if each['origin'] == origin:
 			if (prefix == path[:len(prefix)]) or (prefix[:-1] == path):
 				rv = dict(path=path[len(prefix):])
 				rv.update(each)
@@ -398,7 +401,7 @@ class AuthResource(resource.Resource):
 
 	@inlineCallbacks
 	def check_permission(self, method, uri, webid, appid):
-		location = find_location(uri) # { origin, prefix, root, base, path, canonical_origin }
+		location = find_location(uri) # { origin, prefix, root, base, path }
 		if not location:
 			raise ValueError("missing configuration for <%s>" % (uri, ))
 		path = location['path'].split('/')
@@ -454,6 +457,9 @@ class AuthResource(resource.Resource):
 		if   need_control:
 			mode = ACL_CONTROL
 			reason = yield check_for(ACL_CONTROL)
+			if (reason is not self.PERM_OK) and (not using_inherited) and (method in METHODS_READ):
+				mode = ACL_READ
+				reason = yield check_for(ACL_READ)
 		elif method in METHODS_READ:
 			mode = ACL_READ
 			reason = yield check_for(ACL_READ)
