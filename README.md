@@ -205,7 +205,6 @@ configuration locations.  For example (remember that any `add_header` directive
 in an *nginx* `location` or sub-`location` block clears all inherited
 `add_headers`):
 
-	...
 	add_header Access-Control-Allow-Origin "$http_origin" always;
 	add_header Access-Control-Expose-Headers "Age,Content-Range,ETag,Link,Location,Vary,WWW-Authenticate" always;
 
@@ -216,7 +215,6 @@ in an *nginx* `location` or sub-`location` block clears all inherited
 	    add_header Access-Control-Max-Age 60;
 	    return 204;
 	}
-	...
 
 Configure location(s) to use `auth.py` for authorization and access control, and to
 use `auth.py`'s HTML pages for `401` and `403` responses:

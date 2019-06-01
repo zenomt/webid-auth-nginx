@@ -7,5 +7,4 @@
 <#2>
 	a               acl:Authorization;
 	acl:mode        acl:Read, acl:Write, acl:Control;
-	acl:agentGroup  <groups.ttl#Admin>;
-	acl:origin      "*".
+	acl:agentGroup  <groups.ttl#Admin>.

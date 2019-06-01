@@ -315,6 +315,8 @@ class AuthResource(resource.Resource):
 		return urlparse.urljoin(url, path)
 
 	def send_answer(self, request, body='', code=200, content_type='text/plain', other_headers=[], cache=False, location=None):
+		if isinstance(body, unicode):
+			body = body.encode('utf8')
 		request.setResponseCode(code)
 		request.setHeader('Content-type', content_type)
 		request.setHeader('Content-length', len(body))
@@ -681,7 +683,7 @@ class AuthResource(resource.Resource):
 		if (webid_ref, SOLID_OIDCISSUER, None) in card:
 			if (webid_ref, SOLID_OIDCISSUER, issuer_ref) not in card:
 				raise ValueError("webid <%s> lists issuers but not <%s>" % (webid, issuer_url))
-		elif not webid_parts.hostname.endswith(issuer_parts.hostname):
+		elif (webid_parts.hostname != issuer_parts.hostname) and not webid_parts.hostname.endswith('.' + issuer_parts.hostname):
 			raise ValueError("webid <%s> hostname is not a subdomain of issuer <%s> hostname" % (webid, issuer_url))
 
 		returnValue((claims, webid))
