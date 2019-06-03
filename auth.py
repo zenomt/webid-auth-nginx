@@ -143,7 +143,7 @@ def bytesProducer(b):
 def canonical_origin_parsed(urlparts):
 	scheme = urlparts.scheme.lower()
 	port = urlparts.port
-	if (not port) or (port == { 'http':80, 'https':443 }.get(scheme, None)):
+	if (not port) or (port == { 'http':80, 'https':443 }.get(scheme)):
 		port = ''
 	else:
 		port = ':%s' % (port, )
@@ -185,6 +185,10 @@ parser.add_argument('-r', '--max-refreshes', default=1, type=int,
 	help="maximum failed refreshes before requiring a login (default %(default)s)")
 parser.add_argument('--acl-suffix', default='.acl',
 	help="filename suffix for access control files (default %(default)s)")
+parser.add_argument('--http-timeout', default=5., type=float,
+	help="timeout for HTTP requests to other servers (default %(default).3f)")
+parser.add_argument('--stale-period', default=60., type=float,
+	help="refresh period for cached graphs from other servers (default %(default).3f)")
 parser.add_argument('--debug', action='store_true')
 parser.add_argument('url', help='my auth URL prefix')
 
@@ -219,7 +223,7 @@ def prepare_locations():
 		locations.append(dict(origin=origin, prefix=prefix, root=root, base=origin + prefix))
 	locations.sort(reverse=True, key=lambda x: x['prefix'].count('/'))
 
-def find_location(uri):
+def find_location(uri): # returns { (location), path, query }
 	urlparts = urlparse.urlparse(uri)
 	origin = canonical_origin_parsed(urlparts)
 	path = posixpath.normpath(urlparts.path)
@@ -227,18 +231,85 @@ def find_location(uri):
 		prefix = each['prefix']
 		if each['origin'] == origin:
 			if (prefix == path[:len(prefix)]) or (prefix[:-1] == path):
-				rv = dict(path=path[len(prefix):])
+				rv = dict(path=path[len(prefix):], query=urlparts.query)
 				rv.update(each)
 				return rv
 
 def try_find_local_graph(uri):
 	location = find_location(uri)
-	if location:
+	if location and not location['query']:
 		path = location['root'] + location['path']
 		if posixpath.isfile(path):
 			if args.debug:
 				print "trying to load local graph <%s> (%s)" % (uri, path)
 			return load_local_graph(path, uri)
+
+fetch_graph_cache = {}     # { uri: { etag, stale_at, graph }, ... }
+fetch_graph_requests = {}  # { uri: [ deferred, ... ], ... }
+
+@inlineCallbacks
+def fetch_graph_cached_shared(uri):
+	print "fetch_graph_cached_shared", uri
+	if isinstance(uri, unicode):
+		uri = uri.encode('utf8')
+	uri = urlparse.urldefrag(uri)[0]
+	entry = fetch_graph_cache.get(uri)
+	if entry and (entry['stale_at'] > time.time()):
+		print "returning cached graph for <%s>" % (uri, )
+		returnValue(entry['graph'])
+	request_queue = fetch_graph_requests.get(uri)
+	if request_queue is None:
+		print "starting new request_queue for", uri
+		request_queue = []
+		fetch_graph_requests[uri] = request_queue
+		try:
+			headers = Headers()
+			if entry and entry['etag']:
+				headers.addRawHeader('If-None-Match', entry['etag'])
+			request = agent.request(b'GET', uri, headers=headers)
+			request.addTimeout(args.http_timeout, reactor)
+			print "about to yield on request"
+			response = yield request
+			body = yield readBody(response)
+			print "request and body retrieved"
+
+			if 304 == response.code:
+				print "got 304, reusing"
+				entry['stale_at'] = time.time() + args.stale_period
+				graph = entry['graph']
+			elif 200 != response.code:
+				raise ValueError("bad response from <%s>: %s" % (uri, response.code))
+			else:
+				graph = rdflib.Graph()
+				format = response.headers.getRawHeaders("content-type", [None])[0]
+				format = re.split(r' *; *', format)[0] if format else None
+				etag = response.headers.getRawHeaders("ETag", [None])[0]
+				graph.parse(data=body, format=format, publicID=uri)
+				fetch_graph_cache[uri] = dict(etag=etag, graph=graph, stale_at=time.time() + args.stale_period)
+
+			del fetch_graph_requests[uri]
+			for each in request_queue:
+				each.callback(graph)
+
+			print "returning my own", graph
+			returnValue(graph)
+
+		except Exception as e:
+			del fetch_graph_requests[uri]
+			for each in request_queue:
+				each.errback(e)
+			raise e
+	else:
+		print "piggybacking", uri
+		d = Deferred()
+		request_queue.append(d)
+		graph = yield d
+		print "returning shared <%s>" % (uri, )
+		returnValue(graph)
+
+@inlineCallbacks
+def find_local_or_fetch_graph(uri):
+	returnValue(try_find_local_graph(uri) or (yield fetch_graph_cached_shared(uri)))
 
 @inlineCallbacks
 def do_cleanup():
@@ -387,10 +458,9 @@ class AuthResource(resource.Resource):
 
 		for (auth, ) in filtered_query("SELECT DISTINCT ?auth WHERE { ?auth a acl:Authorization; acl:agentGroup ?g; acl:mode ?perm }"):
 			for group in acl.objects(auth, ACL_AGENTGROUP):
-				yield None # XXX make this function async, remove when it really is
 				try:
 					# XXX replace try_find_local_graph with load_graph_cached_shared_timeout_try_local
-					group_graph = try_find_local_graph(unicode(group))
+					group_graph = yield find_local_or_fetch_graph(unicode(group))
 					if (group, VCARD_HASMEMBER, webid) in group_graph:
 						returnValue(self.PERM_OK)
 				except Exception as e:
@@ -403,7 +473,7 @@ class AuthResource(resource.Resource):
 
 	@inlineCallbacks
 	def check_permission(self, method, uri, webid, appid):
-		location = find_location(uri) # { origin, prefix, root, base, path }
+		location = find_location(uri) # { origin, prefix, root, base, path, query }
 		if not location:
 			raise ValueError("missing configuration for <%s>" % (uri, ))
 		path = location['path'].split('/')
