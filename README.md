@@ -14,10 +14,9 @@ and HTTP APIs behind a reverse proxy such as *nginx*.
 
 ### Work in Progress
 
-The server is currently incomplete: `acl:agentGroup` currently only reads
-locally from locations in the configuration file;
-[WebID Authorization Protocol][zenomt-auth] support is planned but not yet
-available. See [TODO](TODO.md) for more information.
+The server is currently incomplete: [WebID Authorization Protocol][zenomt-auth]
+support is planned but not yet available. See [TODO](TODO.md) for more
+information.
 
 ### Dependencies
 

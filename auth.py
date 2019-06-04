@@ -154,8 +154,7 @@ def canonical_origin(uri):
 
 def load_local_graph(path, publicID, format=None):
 	try:
-		if args.debug:
-			print "loading", path
+		debug_log("loading %s", path)
 		rv = rdflib.Graph()
 		format = format or rdflib.util.guess_format(path) or 'turtle'
 		data = DEFAULT_NS_TTL if format in ('turtle', 'n3') else ''
@@ -187,8 +186,10 @@ parser.add_argument('--acl-suffix', default='.acl',
 	help="filename suffix for access control files (default %(default)s)")
 parser.add_argument('--http-timeout', default=5., type=float,
 	help="timeout for HTTP requests to other servers (default %(default).3f)")
-parser.add_argument('--stale-period', default=60., type=float,
+parser.add_argument('--stale-period', default=30., type=float,
 	help="refresh period for cached graphs from other servers (default %(default).3f)")
+parser.add_argument('--cache-expire', default=900., type=float,
+	help="forget cached graphs older than this (default %(default).3f)")
 parser.add_argument('--debug', action='store_true')
 parser.add_argument('url', help='my auth URL prefix')
 
@@ -210,8 +211,15 @@ db.row_factory = sqlite3.Row
 locations = []
 config_file = json.loads(open(args.config_file, 'rb').read())
 
+fetch_graph_cache = {}     # { uri: { etag, stale_at, graph }, ... }
+fetch_graph_requests = {}  # { uri: [ deferred, ... ], ... }
+
 agent = ContentDecoderAgent(RedirectAgent(Agent(reactor)), [(b"gzip", GzipDecoder)])
 
+
+def debug_log(fmt, *s):
+	if args.debug:
+		print fmt % s
 
 def prepare_locations():
 	for prefix, root in config_file['locations'].items():
@@ -240,26 +248,32 @@ def try_find_local_graph(uri):
 	if location and not location['query']:
 		path = location['root'] + location['path']
 		if posixpath.isfile(path):
-			if args.debug:
-				print "trying to load local graph <%s> (%s)" % (uri, path)
+			debug_log("trying to load local graph <%s> (%s)", uri, path)
 			return load_local_graph(path, uri)
 
-fetch_graph_cache = {}     # { uri: { etag, stale_at, graph }, ... }
-fetch_graph_requests = {}  # { uri: [ deferred, ... ], ... }
+def expire_fetch_graph_cache():
+	now = time.time()
+	for k in list(fetch_graph_cache.keys()):
+		if fetch_graph_requests.get(k):
+			continue
+		entry = fetch_graph_cache[k]
+		if (entry['stale_at'] + args.cache_expire < now) or \
+				(not entry['etag'] and (entry['stale_at'] < now)):
+			del fetch_graph_cache[k]
+			debug_log("expire cached graph <%s>", k)
 
 @inlineCallbacks
 def fetch_graph_cached_shared(uri):
-	print "fetch_graph_cached_shared", uri
+	debug_log("fetch graph shared <%s>", uri)
 	if isinstance(uri, unicode):
 		uri = uri.encode('utf8')
 	uri = urlparse.urldefrag(uri)[0]
 	entry = fetch_graph_cache.get(uri)
 	if entry and (entry['stale_at'] > time.time()):
-		print "returning cached graph for <%s>" % (uri, )
+		debug_log("<%s> fresh in cache", uri)
 		returnValue(entry['graph'])
 	request_queue = fetch_graph_requests.get(uri)
 	if request_queue is None:
-		print "starting new request_queue for", uri
 		request_queue = []
 		fetch_graph_requests[uri] = request_queue
 		try:
@@ -268,15 +282,13 @@ def fetch_graph_cached_shared(uri):
 				headers.addRawHeader('If-None-Match', entry['etag'])
 			request = agent.request(b'GET', uri, headers=headers)
 			request.addTimeout(args.http_timeout, reactor)
-			print "about to yield on request"
 			response = yield request
 			body = yield readBody(response)
-			print "request and body retrieved"
 
 			if 304 == response.code:
-				print "got 304, reusing"
 				entry['stale_at'] = time.time() + args.stale_period
 				graph = entry['graph']
+				debug_log("<%s> 304 Not Modified", uri)
 			elif 200 != response.code:
 				raise ValueError("bad response from <%s>: %s" % (uri, response.code))
 			else:
@@ -286,12 +298,12 @@ def fetch_graph_cached_shared(uri):
 				etag = response.headers.getRawHeaders("ETag", [None])[0]
 				graph.parse(data=body, format=format, publicID=uri)
 				fetch_graph_cache[uri] = dict(etag=etag, graph=graph, stale_at=time.time() + args.stale_period)
+				debug_log("<%s> newly loaded", uri)
 
 			del fetch_graph_requests[uri]
 			for each in request_queue:
 				each.callback(graph)
 
-			print "returning my own", graph
 			returnValue(graph)
 
 		except Exception as e:
@@ -300,11 +312,10 @@ def fetch_graph_cached_shared(uri):
 				each.errback(e)
 			raise e
 	else:
-		print "piggybacking", uri
 		d = Deferred()
 		request_queue.append(d)
 		graph = yield d
-		print "returning shared <%s>" % (uri, )
+		debug_log("<%s> from shared download", uri)
 		returnValue(graph)
 
 @inlineCallbacks
@@ -324,10 +335,16 @@ def do_cleanup():
 			c.execute("DELETE FROM access_token WHERE expires_on < ?", (now, ))
 			c.execute("DELETE FROM token_challenge WHERE expires_on < ?", (now, ))
 			db.commit()
+			expire_fetch_graph_cache()
 		except sqlite3.OperationalError:
 			db.rollback()
 			print traceback.format_exc()
 			print "will retry in", args.cleanup_interval
+		except Exception as e:
+			print "exception in do_cleanup(), aborting task"
+			print traceback.format_exc()
+			db.rollback()
+			return
 		yield delay(args.cleanup_interval)
 
 class AuthResource(resource.Resource):
@@ -358,6 +375,10 @@ class AuthResource(resource.Resource):
 
 	def log_message(self, fmt, *s):
 		log.msg(fmt % s)
+
+	def debug_log(self, fmt, *s):
+		if args.debug:
+			self.log_message(fmt, *s)
 
 	def get_auth_header(self, request, header_type):
 		header = request.getHeader('Authorization')
@@ -620,8 +641,7 @@ class AuthResource(resource.Resource):
 	@inlineCallbacks
 	def get_url(self, url, obj=None, query=None, basic_auth=None, bearer_auth=None):
 		try:
-			if args.debug:
-				print "get_url", url
+			self.debug_log("get_url %s", url)
 			headers = Headers()
 			requestBody = None
 			if obj:
@@ -720,8 +740,7 @@ class AuthResource(resource.Resource):
 		issuer_parts = urlparse.urlparse(issuer_url)
 		my_client = issuer_row['client_id']
 
-		if args.debug:
-			print "check_id_token", raw_token
+		self.debug_log("check_id_token %s", raw_token)
 
 		if not webid:
 			raise ValueError("id_token doesn't identify a webid")
@@ -1033,8 +1052,7 @@ CREATE TABLE IF NOT EXISTS token_challenge (
 db.commit()
 
 prepare_locations()
-if args.debug:
-	print "locations", locations
+debug_log("locations %s", locations)
 
 do_cleanup() # async
 factory = server.Site(AuthResource(), logFormatter=proxiedLogFormatter)
