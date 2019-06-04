@@ -480,7 +480,6 @@ class AuthResource(resource.Resource):
 		for (auth, ) in filtered_query("SELECT DISTINCT ?auth WHERE { ?auth a acl:Authorization; acl:agentGroup ?g; acl:mode ?perm }"):
 			for group in acl.objects(auth, ACL_AGENTGROUP):
 				try:
-					# XXX replace try_find_local_graph with load_graph_cached_shared_timeout_try_local
 					group_graph = yield find_local_or_fetch_graph(unicode(group))
 					if (group, VCARD_HASMEMBER, webid) in group_graph:
 						returnValue(self.PERM_OK)
