@@ -10,4 +10,7 @@
 	# for example, these would match https://app2.example/app2/oauth/code
 	# but not https://app2.example/app3/oauth/code .
 	acl:app        "https://app2.example/app2/oauth/" ;
-	acl:app        "https://app2.example/app4/oauth/" .
+	acl:app        "https://app2.example/app4/oauth/" ;
+
+	# also match the client.py's default appID.
+	acl:app        "https://app.example/oauth/" .
