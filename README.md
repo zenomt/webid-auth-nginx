@@ -283,7 +283,7 @@ Add your RSA public key and self-issuer URI to your WebID profile:
 	        cert:modulus "D7B6DF...A5EC"^^xsd:hexBinary # full modulus elided for clarity
 	    ].
 
-Now you're ready to get an access token. Using the example installation from
+Now you're ready to get an access token. Using the example configuration from
 above and the [samples](samples) directory:
 
 	$ python client.py -k data/client-private.pem -w 'https://mike.example/card.ttl#me' https://mike.example/wac/check.html
