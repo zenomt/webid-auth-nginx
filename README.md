@@ -9,14 +9,16 @@ This server presents an `authcheck` HTTP API that is compatible with *nginx*'s
 to work in other environments. Additionally it provides endpoints and default
 pages to allow a user to log in with their WebID-OIDC credentials.
 
+The server provides a `webid-pop` HTTP endpoint that serves as the reference
+implementation for the `webid_pop_endpoint` API described in
+[WebID HTTP Authorization Protocol][zenomt-auth].
+
 The server can be used to provide authorization and access control to files
 and HTTP APIs behind a reverse proxy such as *nginx*.
 
 ### Work in Progress
 
-The server is currently incomplete: [WebID Authorization Protocol][zenomt-auth]
-support is planned but not yet available. See [TODO](TODO.md) for more
-information.
+This is a work in progress. See [TODO](TODO.md) for what's On The List.
 
 ### Dependencies
 
@@ -78,6 +80,9 @@ The server exposes the following endpoints below its base URL:
   - `code` -- Handler for the OIDC `authorization_code` redirect
   - `refresh` -- Handler for the stale session reauthentication page
   - `logout` -- Handler for the "log out and try again with a different provider" page
+  - `webid-pop` -- The `webid_pop_endpoint` of
+    [WebID HTTP Authorization Protocol][zenomt-auth]; see that document
+    for a description of this endpoint's API
 
 In addition, the server provides the following default HTML pages (located
 in the `www` directory) for logging in, refreshing, and forbidding access:
@@ -141,7 +146,9 @@ re-writing is needed. See the configuration below.
   - `WWW-Authenticate` - If set, the `WWW-Authenticate` header that should
     be returned to the client with a `401` response. *nginx* automatically
     includes this response header with a `401` response to the client, so it
-    doesn't need to be manually configured.
+    doesn't need to be manually configured. This header includes parameters
+    for [WebID HTTP Authorization Protocol][zenomt-auth] including a challenge
+    `nonce` and the `webid_pop_endpoint` URI.
 
 ### Configuration
 
@@ -209,7 +216,7 @@ in an *nginx* `location` or sub-`location` block clears all inherited
 
 	if ($request_method = 'OPTIONS') {
 	    add_header Access-Control-Allow-Origin "$http_origin";
-	    add_header Access-Control-Allow-Headers "Cache-Control,If-Match,If-None-Match,If-Modified-Since,If-Unmodified-Since,If-Range,Range,Authorization,Content-Type";
+	    add_header Access-Control-Allow-Headers "Cache-Control,If-Match,If-None-Match,If-Modified-Since,If-Unmodified-Since,If-Range,Range,Authorization,Content-Type,Link,Slug";
 	    add_header Access-Control-Allow-Methods "OPTIONS,HEAD,GET,PATCH,POST,PUT,DELETE,PROPFIND,PROPPATCH,MKCOL,COPY,MOVE,LOCK,UNLOCK";
 	    add_header Access-Control-Max-Age 60;
 	    return 204;

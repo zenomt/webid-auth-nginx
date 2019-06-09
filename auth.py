@@ -34,6 +34,7 @@ import os
 import posixpath
 import rdflib
 import re
+import rsa
 import sqlite3
 import sys
 import thread
@@ -42,6 +43,8 @@ import traceback
 import urllib
 import urllib2
 import urlparse
+
+from jose import jwt, jws
 
 from twisted.internet import reactor
 from twisted.internet.defer import inlineCallbacks, returnValue, Deferred, succeed
@@ -90,6 +93,10 @@ METHODS_WRITE  = ["PUT", "POST", "DELETE", "PATCH", "PROPPATCH", "MKCOL", "COPY"
 METHODS_APPEND = ["PUT", "POST", "PATCH", "PROPPATCH", "MKCOL"]
 
 inf = float('inf')
+
+def ensure(v, msg=''):
+	if not v:
+		raise ValueError(msg)
 
 def b64u_encode(s):
 	return base64.urlsafe_b64encode(s).rstrip('=')
@@ -165,6 +172,31 @@ def load_local_graph(path, publicID, format=None):
 		print "error loading RDF <%s> (%s)" % (publicID, path)
 		raise e
 
+def get_rsa_jwks_from_card(card, webid):
+	keys = []
+	initBindings = dict(webid=rdflib.URIRef(webid))
+	ns = { 'cert': rdflib.URIRef('http://www.w3.org/ns/auth/cert#') }
+	qresult = card.query("""
+SELECT ?exponent ?modulus WHERE {
+  ?key   a              cert:RSAPublicKey;
+         cert:exponent  ?exponent;
+         cert:modulus   ?modulus.
+  ?webid cert:key ?key.
+}""", initBindings=initBindings, initNs=ns)
+	for exponent, modulus in qresult:
+		if exponent.datatype == rdflib.XSD.integer:
+			e = b64u_encode(rsa.transform.int2bytes(exponent.value))
+		else:
+			continue # exponent must be an integer
+		if modulus.datatype == rdflib.XSD.hexBinary:
+			n_bytes = binascii.unhexlify(str(modulus))
+		elif modulus.datatype == rdflib.XSD.base64Binary:
+			n_bytes = base64.b64decode(str(modulus))
+		else:
+			continue # modulus wrong format
+		n = b64u_encode(n_bytes)
+		keys.append(dict(e=e, n=n, kty="RSA"))
+	return dict(keys=keys)
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-p', '--port', type=int, default=8080, help='listen on port (default %(default)s)')
@@ -178,6 +210,7 @@ parser.add_argument('--docroot', default='./www',
 	help='base directory for simple file server (default %(default)s)')
 parser.add_argument('-l', '--session-lifetime', help="lifetime for sessions (default %(default)s)", default=86400)
 parser.add_argument('-t', '--token-lifetime', help="lifetime for access tokens (default %(default)s)", default=1800)
+parser.add_argument('-m', '--min-token-lifetime', help="minimum lifetime for access tokens (default %(default)s)", default=180)
 parser.add_argument('-i', '--cleanup-interval', type=float, default=10.,
 	help="interval between database cleanup runs (default %(default).3f)")
 parser.add_argument('-r', '--max-refreshes', default=1, type=int,
@@ -718,6 +751,13 @@ class AuthResource(resource.Resource):
 		return b64u_sha256(state)[:16]
 
 	@inlineCallbacks
+	def load_json(self, url):
+		response, body = yield self.get_url(url)
+		if 200 != response.code:
+			raise ValueError("unexpected esponse code %d for <%s>", (response.code, url))
+		returnValue(json.loads(body))
+
+	@inlineCallbacks
 	def load_graph(self, url):
 		response, body = yield self.get_url(url)
 		if 200 != response.code:
@@ -728,6 +768,28 @@ class AuthResource(resource.Resource):
 		rv.parse(data=body, format=content_type, publicID=url)
 		returnValue(rv)
 
+	def ensure_audience_member(self, claims, expected):
+		aud = claims["aud"]
+		if (aud != expected) and not isinstance(aud, list):
+			raise ValueError("audience mismatch")
+		if isinstance(aud, list) and expected not in aud:
+			raise ValueError("audience missing expected member")
+		if claims.get("azp") and (claims.get("azp") != expected):
+			raise ValueError("authorized party mismatch")
+
+	def ensure_valid_issuer(self, card, webid, issuer_url):
+		webid_ref = rdflib.URIRef(webid)
+		issuer_ref = rdflib.URIRef(issuer_url)
+
+		if (webid_ref, SOLID_OIDCISSUER, None) in card:
+			if (webid_ref, SOLID_OIDCISSUER, issuer_ref) not in card:
+				raise ValueError("webid <%s> lists issuers but not <%s>" % (webid, issuer_url))
+		else:
+			webid_parts = urlparse.urlparse(webid)
+			issuer_parts = urlparse.urlparse(issuer_url)
+			if (webid_parts.hostname != issuer_parts.hostname) and not webid_parts.hostname.endswith('.' + issuer_parts.hostname):
+				raise ValueError("webid <%s> hostname is not a subdomain of issuer <%s> hostname" % (webid, issuer_url))
+
 	@inlineCallbacks
 	def check_id_token(self, raw_token, state, issuer_row):
 		enc_header, enc_claims, enc_sig = raw_token.split('.')
@@ -736,7 +798,6 @@ class AuthResource(resource.Resource):
 		issuer_url = issuer_row['issuer_actual'] or issuer_row['issuer_url']
 		nonce = claims.get('nonce') or ''
 		webid_parts = urlparse.urlparse(webid)
-		issuer_parts = urlparse.urlparse(issuer_url)
 		my_client = issuer_row['client_id']
 
 		self.debug_log("check_id_token %s", raw_token)
@@ -747,14 +808,7 @@ class AuthResource(resource.Resource):
 		if self.normalize_issuer(claims.get("iss")) != self.normalize_issuer(issuer_url):
 			raise ValueError("id_token doesn't claim issuer")
 
-		aud = claims["aud"]
-		if (aud != my_client) and not isinstance(aud, list):
-			raise ValueError("i am not the audience")
-		if isinstance(aud, list) and my_client not in aud:
-			raise ValueError("audience list doesn't include me")
-
-		if claims.get("azp") and (claims.get("azp") != my_client):
-			raise ValueError("authorized party mismatch")
+		self.ensure_audience_member(claims, my_client)
 
 		if claims.get("exp", 0) < time.time():
 			raise ValueError("id_token expires in the past")
@@ -765,14 +819,7 @@ class AuthResource(resource.Resource):
 			raise ValueError("webid scheme is not https")
 
 		card = yield self.load_graph(webid)
-		webid_ref = rdflib.URIRef(webid)
-		issuer_ref = rdflib.URIRef(issuer_url)
-
-		if (webid_ref, SOLID_OIDCISSUER, None) in card:
-			if (webid_ref, SOLID_OIDCISSUER, issuer_ref) not in card:
-				raise ValueError("webid <%s> lists issuers but not <%s>" % (webid, issuer_url))
-		elif (webid_parts.hostname != issuer_parts.hostname) and not webid_parts.hostname.endswith('.' + issuer_parts.hostname):
-			raise ValueError("webid <%s> hostname is not a subdomain of issuer <%s> hostname" % (webid, issuer_url))
+		self.ensure_valid_issuer(card, webid, issuer_url)
 
 		returnValue((claims, webid))
 
@@ -906,11 +953,106 @@ class AuthResource(resource.Resource):
 			return self.send_answer(request, code=302, location=orig_url)
 		return self.send_answer(request, 'logged out')
 
+	def _send_token_answer(self, request, access_token=None, expires_in=None, error=None, error_description=None):
+		redirect_uri = qparam(request.args, 'redirect_uri')
+		state = qparam(request.args, 'state')
+		code = 400 if error else 200
+		rv = {}
+		if access_token:
+			rv['access_token'] = access_token
+			rv['expires_in'] = expires_in
+			rv['token_type'] = 'Bearer'
+		if state:
+			rv['state'] = state
+		if error:
+			rv['error'] = error
+			rv['error_description'] = error_description
+		if redirect_uri:
+			return self.send_answer(request, code=302, location=redirect_uri + '#' + urlencode(rv))
+		other_headers = [('Access-Control-Allow-Origin', request.getHeader('Origin') or '*')]
+		return self.send_answer(request, code=code, body=json.dumps(rv, indent=4),
+			content_type='application/json', other_headers=other_headers)
+
+	def _compare_uris(self, uri1, uri2):
+		parts1 = urlparse.urlparse(uri1)
+		parts2 = urlparse.urlparse(uri2)
+
+		return (canonical_origin_parsed(parts1) == canonical_origin_parsed(parts2)) and \
+			(parts1.path == parts2.path) and \
+			(parts1.query == parts2.query)
+
 	@inlineCallbacks
 	def answer_webid_pop(self, request):
-		yield succeed(None)
-		other_headers = [('Access-Control-Allow-Origin', request.getHeader('Origin') or '*')]
-		returnValue(self.send_answer(request, code=501, other_headers=other_headers))
+		trusted_algorithms = ["RS256", "RS384", "RS512", "ES256", "ES384", "ES512"]
+		params = request.args
+		proof_token = qparam(params, 'proof_token')
+		try:
+			proof_claims = jwt.get_unverified_claims(proof_token)
+			ensure(all([proof_claims[i] for i in ["aud", "nonce", "id_token", "iss", "exp"]]))
+			id_token = proof_claims['id_token']
+			id_token_claims = jwt.get_unverified_claims(id_token)
+			ensure(all([id_token_claims[i] for i in ["aud", "exp", "cnf", "sub", "iss"]]))
+			proof_key = id_token_claims['cnf']['jwk']
+
+			uri = proof_claims['aud']
+			uri = uri[0] if isinstance(uri, list) else uri
+
+			webid = id_token_claims.get('webid') or id_token_claims['sub']
+			ensure(':' in webid, "couldn't find webid in id_token")
+			id_token_issuer = id_token_claims['iss']
+
+			jws.verify(proof_token, proof_key, algorithms=trusted_algorithms)
+			self.ensure_audience_member(id_token_claims, proof_claims['iss'])
+			now = time.time()
+			ensure(proof_claims['exp'] > now, "proof_token expired")
+			ensure(proof_claims['exp'] <= id_token_claims['exp'], "proof_token expires after id_token")
+
+			c = db.cursor()
+			challenge_row = c.execute("SELECT * FROM token_challenge WHERE nonce = ?", (proof_claims['nonce'], )).fetchone()
+			if not challenge_row:
+				raise ValueError("challenge nonce not found")
+			c.execute("DELETE FROM token_challenge WHERE id = ?", (challenge_row['id'], ))
+			db.commit()
+
+			if not self._compare_uris(uri, challenge_row['uri']):
+				raise ValueError("nonce wasn't issued for URI")
+
+			card = yield self.load_graph(webid)
+			self.ensure_valid_issuer(card, webid, id_token_issuer)
+			if id_token_issuer == 'https://self-issued.me':
+				jwks = get_rsa_jwks_from_card(card, webid)
+				if not jwks:
+					raise ValueError("self-issued id_token but webid doesn't list any valid cert:RSAPublicKeys")
+				jws.verify(id_token, jwks, algorithms=["RS256"]) # only RS256 allowed for self-issued
+			else:
+				normalized_issuer = self.normalize_issuer(id_token_issuer)
+				iss_config = yield self.load_json(normalized_issuer + '.well-known/openid-configuration')
+				actual_issuer = iss_config.get('issuer') or id_token_issuer
+				normalized_issuer = self.normalize_issuer(actual_issuer)
+				if 'jwks_uri' not in iss_config:
+					raise ValueError("issuer <%s> config doesn't list a JWKS URI" % (id_token_issuer, ))
+				jwks = yield self.load_json(urlparse.urljoin(normalized_issuer, iss_config['jwks_uri']))
+				jws.verify(id_token, jwks, algorithms=trusted_algorithms)
+
+			id_aud = id_token_claims['aud']
+			id_aud = id_aud if isinstance(id_aud, list) else [ id_aud ]
+			maybe_appids = filter(lambda x : ':' in x, id_aud)
+			appid = maybe_appids[-1] if maybe_appids else "unknown:"
+
+			now = long(time.time())
+			token_expires_on = long(max(now + args.min_token_lifetime, min(now + args.token_lifetime, proof_claims['exp'])))
+			expires_in = long(token_expires_on - now)
+			access_token = random_token()
+
+			db.cursor().execute("INSERT INTO access_token (expires_on, host, access_token, webid, appid) VALUES (?, ?, ?, ?, ?)",
+				(token_expires_on, self.get_client_addr(request), access_token, webid, appid))
+			db.commit()
+
+			print "issue token to: <%s> appid: <%s> lifetime: %s" % (webid, appid, expires_in)
+			returnValue(self._send_token_answer(request, access_token=access_token, expires_in=expires_in))
+		except Exception as e:
+			print traceback.format_exc()
+			returnValue(self._send_token_answer(request, error="invalid_request", error_description=`e`))
 
 	@asyncResponse
 	@inlineCallbacks

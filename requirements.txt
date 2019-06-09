@@ -2,3 +2,6 @@ twisted
 pyOpenSSL
 service_identity
 python-jose
+rsa
+www-authenticate
+rdflib
