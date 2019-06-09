@@ -239,6 +239,67 @@ use `auth.py`'s HTML pages for `401` and `403` responses:
 	    }
 	    ...
 
+client.py
+---------
+This is a test client for the [WebID Authorization Protocol][zenomt-auth].
+It challenges a URI for a `WWW-Authenticate` header, and if the server appears
+to use the authorization protocol, the test client tries to obtain an access
+token that you can then use with a tool like `curl` (until the token expires).
+
+`client.py` can either generate a [self-issued][] `id_token` (default) or,
+if you have access to the private key of your OIDC issuer, it can pretend to
+be your normal issuer by using the `-i` option.
+
+For the self-issued case, you must add the self-issuer URI and a public key
+to your WebID profile.
+
+First, if you don't already have one, generate an RSA private/public key pair
+and find the exponent (`e`) and modulus:
+
+	$ openssl genrsa -out data/client-private.pem 2048
+	Generating RSA private key, 2048 bit long modulus
+	......+++
+	.........................................................................................+++
+	e is 65537 (0x010001)
+	
+	$ openssl rsa -in data/client-private.pem -outform PEM -pubout -out data/client-public.pem
+	writing RSA key
+	
+	$ openssl rsa -pubin -in data/client-public.pem -noout -modulus
+	Modulus=D7B6DF2DF09F251546CAE49F76A0DE93DDE126EA10EF65A1E3B08748FED6847E5B1CD6E4210707A064831C3C9F57297D8F5F65DDE4FEEF9FF36D579533AB75984E4C8E4AD9493CF611A91DC9BEC5311CB3AF293BFDCD5D701F58C91A708F6FAD6CF15A413264ECDBC0983EE99AB3628D5DC4731AE0E5F7B8F814CD297A4FDD63854221CB6EF67B336790F1873D42F7E2027FADFFEE8884A35809893F0534683C40321DD62EFBC706F68516A6C0F1A331059EFF7ACE109D795260EBC8223809F36A25BFF048E60E0C81ECA686852D117B4AC51BE3991F3C1A1D563E118B8630055A39B4CC5AA265B1555E2A67A8A2C96D3E0674164EDA97806893C694D012A5EC
+
+Add your RSA public key and self-issuer URI to your WebID profile:
+
+	@prefix cert:  <http://www.w3.org/ns/auth/cert#> .
+	@prefix solid: <http://www.w3.org/ns/solid/terms#> .
+	@prefix xsd:   <http://www.w3.org/2001/XMLSchema#> .
+	
+	<#me>
+	    solid:oidcIssuer <https://self-issued.me>;
+	
+	    cert:key [
+	        a cert:RSAPublicKey;
+	        cert:exponent 65537;
+	        cert:modulus "D7B6DF...A5EC"^^xsd:hexBinary # full modulus elided for clarity
+	    ].
+
+Now you're ready to get an access token. Using the example installation from
+above and the [samples](samples) directory:
+
+	$ python client.py -k data/client-private.pem -w 'https://mike.example/card.ttl#me' https://mike.example/wac/check.html
+	{
+	    "access_token": "a0wBCgJajBtKX2PZ1-Uy6ATW2unYMeFxqyAXoV12",
+	    "token_type": "Bearer",
+	    "expires_in": 180
+	}
+
+You can now use the `access_token` with `curl` to access the resource, for
+the next 180 seconds:
+
+	$ curl https://mike.example/wac/check.html -H 'Authorization: Bearer a0wBCgJajBtKX2PZ1-Uy6ATW2unYMeFxqyAXoV12'
+	...
+
+
 
   [auth-module]: https://nginx.org/en/docs/http/ngx_http_auth_request_module.html
   [CORS]:        https://www.w3.org/TR/cors/
@@ -247,3 +308,4 @@ use `auth.py`'s HTML pages for `401` and `403` responses:
   [WAC]:         https://github.com/solid/web-access-control-spec
   [WebID-OIDC]:  https://github.com/solid/webid-oidc-spec
   [zenomt-auth]: https://github.com/zenomt/webid-auth-protocol
+  [self-issued]: https://openid.net/specs/openid-connect-core-1_0.html#SelfIssued

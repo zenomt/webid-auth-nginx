@@ -1,6 +1,6 @@
 {
 	"locations": {
-		"https://mike.example/": "samples/root/",
+		"https://mike.example/wac/": "samples/root/",
 
 		"https://alice.example/": "/path/to/alice-root/",
 		"https://alice.example/apps/": "/path/to/apps-root/",
