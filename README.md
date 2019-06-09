@@ -294,8 +294,7 @@ above and the [samples](samples) directory:
 	}
 
 You can now use the `access_token` with `curl` to access that resource and
-any others in the same [protection space][prot-space], for the next 180
-seconds:
+any others for which this auth server is configured, for the next 180 seconds:
 
 	$ curl https://mike.example/wac/check.html -H 'Authorization: Bearer a0wBCgJajBtKX2PZ1-Uy6ATW2unYMeFxqyAXoV12'
 	...
@@ -310,4 +309,3 @@ seconds:
   [WebID-OIDC]:  https://github.com/solid/webid-oidc-spec
   [zenomt-auth]: https://github.com/zenomt/webid-auth-protocol
   [self-issued]: https://openid.net/specs/openid-connect-core-1_0.html#SelfIssued
-  [prot-space]:  https://tools.ietf.org/html/rfc7235#section-2.2
