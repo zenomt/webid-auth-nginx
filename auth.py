@@ -698,15 +698,25 @@ class AuthResource(resource.Resource):
 
 	@inlineCallbacks
 	def create_issuer(self, issuer_url):
+		provided_issuer_url = issuer_url
 		def suburl(url):
 			return urlparse.urljoin(issuer_url, url) if url else None
 
+		@inlineCallbacks
+		def get_config():
+			response, body = yield self.get_url(suburl('.well-known/openid-configuration'))
+			returnValue(json.loads(body) if 200 == response.code else {})
+
 		try:
 			db.rollback()
-			response, body = yield self.get_url(suburl('.well-known/openid-configuration'))
-			if 200 != response.code:
-				returnValue(None)
-			config = json.loads(body)
+			config = yield get_config()
+			if 'issuer' in config and not (issuer_url == self.normalize_issuer(config['issuer'])):
+				print "issuer %s -> %s" % (issuer_url, config['issuer'])
+				issuer_url = self.normalize_issuer(config['issuer'])
+				config = yield get_config()
+				if 'issuer' in config and not (issuer_url == self.normalize_issuer(config['issuer'])):
+					print "issuer %s is misconfigured" % (issuer_url, )
+					returnValue(None)
 			if (not config.get('authorization_endpoint')) or (not config.get('token_endpoint')) \
 					or (not config.get('jwks_uri')) or (not config.get('registration_endpoint')):
 				returnValue(None)
@@ -730,8 +740,8 @@ class AuthResource(resource.Resource):
 					"    auth_url, token_url, jwks_url, secret_post, secret_basic) "
 					"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (
 						now + lifetime, hard_expiration, lifetime,
-						issuer_url,
-						suburl(config.get('issuer')),
+						provided_issuer_url,
+						config.get('issuer'),
 						registration.get('client_id'), registration.get('client_secret'),
 						suburl(config.get('userinfo_endpoint')),
 						suburl(config.get('authorization_endpoint')),
@@ -741,6 +751,7 @@ class AuthResource(resource.Resource):
 					))
 			rv = c.execute("SELECT * FROM issuer WHERE id = ?", (c.lastrowid, )).fetchone()
 			db.commit()
+			print "created issuer %s (%s)" % (provided_issuer_url, config.get('issuer') or '')
 			returnValue(rv)
 		except Exception as e:
 			print traceback.format_exc()
