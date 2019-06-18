@@ -779,13 +779,12 @@ class AuthResource(resource.Resource):
 		rv.parse(data=body, format=content_type, publicID=url)
 		returnValue(rv)
 
-	def ensure_audience_member(self, claims, expected):
-		aud = claims["aud"]
-		if (aud != expected) and not isinstance(aud, list):
-			raise ValueError("audience mismatch")
-		if isinstance(aud, list) and expected not in aud:
+	def ensure_audience_member(self, claims, expected, check_azp=True):
+		aud = claims['aud']
+		aud = aud if isinstance(aud, list) else [aud]
+		if expected not in aud:
 			raise ValueError("audience missing expected member")
-		if claims.get("azp") and (claims.get("azp") != expected):
+		if check_azp and claims.get('azp') and (claims['azp'] != expected):
 			raise ValueError("authorized party mismatch")
 
 	def ensure_valid_issuer(self, card, webid, issuer_url):
@@ -1013,7 +1012,7 @@ class AuthResource(resource.Resource):
 			id_token_issuer = id_token_claims['iss']
 
 			jws.verify(proof_token, proof_key, algorithms=trusted_algorithms)
-			self.ensure_audience_member(id_token_claims, proof_claims['iss'])
+			self.ensure_audience_member(id_token_claims, proof_claims['iss'], check_azp=False)
 			now = time.time()
 			ensure(proof_claims['exp'] > now, "proof_token expired")
 			ensure(proof_claims['exp'] <= id_token_claims['exp'], "proof_token expires after id_token")
@@ -1045,10 +1044,8 @@ class AuthResource(resource.Resource):
 				jwks = yield self.load_json(urlparse.urljoin(normalized_issuer, iss_config['jwks_uri']))
 				jws.verify(id_token, jwks, algorithms=trusted_algorithms)
 
-			id_aud = id_token_claims['aud']
-			id_aud = id_aud if isinstance(id_aud, list) else [ id_aud ]
-			maybe_appids = filter(lambda x : ':' in x, id_aud)
-			appid = maybe_appids[-1] if maybe_appids else "unknown:"
+			appid = proof_claims['iss']
+			appid = appid if ':' in appid else "unknown:"
 
 			now = long(time.time())
 			token_expires_on = long(max(now + args.min_token_lifetime, min(now + args.token_lifetime, proof_claims['exp'])))

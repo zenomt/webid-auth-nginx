@@ -135,7 +135,7 @@ jwk = make_jwk()
 id_token = make_id_token(args.webid, "cli-tool", nonce=str(uuid.uuid4()), lifetime=args.id_token_lifetime,
 		redirect_uri=args.app_id, cnf=dict(jwk=jwk), sub_jwk=jwk if is_self_issued else None)
 
-proof_token = make_proof_token(id_token=id_token, aud=uri, nonce=www_auth['nonce'], issuer="cli-tool", lifetime=args.pop_token_lifetime)
+proof_token = make_proof_token(id_token=id_token, aud=uri, nonce=www_auth['nonce'], issuer=args.app_id, lifetime=args.pop_token_lifetime)
 if args.debug:
 	print "proof token", proof_token
 
