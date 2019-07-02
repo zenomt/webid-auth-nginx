@@ -9,6 +9,6 @@
 <#1>
 	a              acl:Authorization;
 	acl:agentClass foaf:Agent; # anyone can read this directory.
-	acl:mode       acl:Read;
+	acl:mode       acl:Read, acl:Search;
 	acl:origin     "*";
 	acl:default    <./>. # unless overridden, anyone can read any subdir or file.

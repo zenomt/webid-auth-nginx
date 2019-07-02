@@ -65,6 +65,7 @@ ACL_AGENT          = rdflib.URIRef('http://www.w3.org/ns/auth/acl#agent')
 ACL_AGENTCLASS     = rdflib.URIRef('http://www.w3.org/ns/auth/acl#agentClass')
 ACL_AGENTGROUP     = rdflib.URIRef('http://www.w3.org/ns/auth/acl#agentGroup')
 ACL_AUTHORIZATION  = rdflib.URIRef('http://www.w3.org/ns/auth/acl#Authorization')
+ACL_SEARCH         = rdflib.URIRef('http://www.w3.org/ns/auth/acl#Search')
 ACL_READ           = rdflib.URIRef('http://www.w3.org/ns/auth/acl#Read')
 ACL_WRITE          = rdflib.URIRef('http://www.w3.org/ns/auth/acl#Write')
 ACL_APPEND         = rdflib.URIRef('http://www.w3.org/ns/auth/acl#Append')
@@ -223,6 +224,7 @@ parser.add_argument('--stale-period', default=30., type=float,
 	help="refresh period for cached graphs from other servers (default %(default).3f)")
 parser.add_argument('--cache-expire', default=900., type=float,
 	help="forget cached graphs older than this (default %(default).3f)")
+parser.add_argument('--always-search', action='store_true', help="always allow directories to be searched")
 parser.add_argument('--debug', action='store_true')
 parser.add_argument('url', help='my auth URL prefix')
 
@@ -550,15 +552,17 @@ class AuthResource(resource.Resource):
 			if posixpath.isfile(aclFilename):
 				cachedReadable = False
 				lastACL = load_local_graph(aclFilename, aclURI, format='turtle')
-				reason = yield self.check_acl_for_perm(lastACL, webid, appid, app_origin, ACL_READ)
-				if reason is not self.PERM_OK:
-					returnValue((reason, None))
+				if not args.always_search:
+					reason = yield self.check_acl_for_perm(lastACL, webid, appid, app_origin, ACL_SEARCH)
+					if reason is not self.PERM_OK:
+						returnValue((reason, None))
 			elif not lastACL:
 				raise ValueError("missing root ACL (%s) <%s>?" % (aclFilename, aclURI))
 			elif not cachedReadable:
-				reason = yield self.check_acl_for_perm(lastACL, webid, appid, app_origin, ACL_READ, inherited=True)
-				if reason is not self.PERM_OK:
-					returnValue((reason, None))
+				if not args.always_search:
+					reason = yield self.check_acl_for_perm(lastACL, webid, appid, app_origin, ACL_SEARCH, inherited=True)
+					if reason is not self.PERM_OK:
+						returnValue((reason, None))
 				cachedReadable = True
 
 		using_inherited = cachedReadable
