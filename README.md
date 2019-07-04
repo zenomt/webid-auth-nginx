@@ -43,8 +43,7 @@ The server implements [Web Access Control][WAC] with a few modifications:
   - `acl:origin` objects can be URIs or string literals;
   - `acl:origin` can be the special literal `"*"`, which matches all origins;
   - `acl:app` for [application identifier][zenomt-auth] prefixes (only usable
-    with [WebID Authorization Protocol][zenomt-auth] bearer tokens, not yet
-    implemented).
+    with [WebID Authorization Protocol][zenomt-auth] bearer tokens).
 
 The following permission modes are required to satisfy the following accesses:
 
