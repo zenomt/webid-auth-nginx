@@ -214,7 +214,7 @@ in an *nginx* `location` or sub-`location` block clears all inherited
 `add_headers`):
 
 	add_header Access-Control-Allow-Origin "$http_origin" always;
-	add_header Access-Control-Expose-Headers "Age,Content-Range,ETag,Link,Location,Vary,WWW-Authenticate" always;
+	add_header Access-Control-Expose-Headers "Age,Content-Range,ETag,Link,Location,User,Vary,WWW-Authenticate" always;
 
 	if ($request_method = 'OPTIONS') {
 	    add_header Access-Control-Allow-Origin "$http_origin";
@@ -238,6 +238,10 @@ use `auth.py`'s HTML pages for `401` and `403` responses:
 	        include cors.conf;
 	
 	        # alternatively you could include CORS directives inline here.
+
+	        # Solid says to set the User response header to the authenticated webid:
+	        auth_request_set $auth_webid $upstream_http_user;
+	        add_header User $auth_webid; # caution: this would reset all inherited add_headers
 	    }
 	    ...
 
