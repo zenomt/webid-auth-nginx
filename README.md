@@ -35,8 +35,8 @@ The server implements [Web Access Control][WAC] with several modifications:
 
   - The `acl`, `foaf`, `solid`, and `vcard` prefixes are pre-defined for convenience;
   - `acl:Search` permission is required for every directory from the base prefix
-    down to the location of the requested resource (this can be disabled with the
-    `--always-search` command-line option to `auth.py`);
+    down to the location of the requested resource (this permission is inferred for
+    all if it doesn't appear anywhere in the access control file);
   - `acl:Read` permission in an ACL file also grants read for that ACL file;
   - `acl:Other` permission mode for any method that doesn't fall under
     `acl:Read`, `acl:Write`, or `acl:Append`;
@@ -66,8 +66,7 @@ For more information, see [`acl-changes.ttl`](acl-changes.ttl).
 
 The following permission modes are required to satisfy the following accesses:
 
-  - `acl:Search` on a directory/container for any resource in that container
-    (disable this non-standard requirement with option `--always-search`);
+  - `acl:Search` on a directory/container for any resource in that container;
   - `acl:Control` for any access to a resource whose URL path part ends
     with the ACL suffix (by default `.acl`);
   - `acl:Read` for methods `OPTIONS`, `GET`, `HEAD`, `TRACE`, `PROPFIND`;
