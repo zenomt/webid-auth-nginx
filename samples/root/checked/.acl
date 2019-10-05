@@ -6,4 +6,4 @@
 	acl:agentClass acl:AuthenticatedAgent;
 	acl:mode       acl:Read, acl:Search;
 	acl:origin     "*";
-	acl:default    <./>.
+	acl:default    true .

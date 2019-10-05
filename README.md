@@ -31,7 +31,7 @@ with
 
 Web Access Control
 ------------------
-The server implements [Web Access Control][WAC] with a few modifications:
+The server implements [Web Access Control][WAC] with several modifications:
 
   - The `acl`, `foaf`, `solid`, and `vcard` prefixes are pre-defined for convenience;
   - `acl:Search` permission is required for every directory from the base prefix
@@ -44,6 +44,25 @@ The server implements [Web Access Control][WAC] with a few modifications:
   - `acl:origin` can be the special literal `"*"`, which matches all origins;
   - `acl:app` for [application identifier][zenomt-auth] prefixes (only usable
     with [WebID Authorization Protocol][zenomt-auth] bearer tokens).
+  - `acl:default`'s value can now be an `xsd:boolean` (default `false`); any
+    non-`false` value makes the `acl:Authorization` eligible for consideration
+    when inherited;
+  - `acl:accessTo` is not used and is ignored. Instead, use `acl:accessToClass` with the
+    following classes:
+    * `acl:Resource` - the class of all resources subject to WAC (the default if no
+      class(es) is specified);
+    * `acl:Container` - the class of all containers/directories;
+    * `acl:Document` - the class of all non-container resources;
+    * `acl:SubResource` - the class of all resources excluding the container
+      whose Access Control Resource this is;
+    * `acl:SubContainer` - the class of all containers excluding the one whose
+      Access Control Resource this is.
+  - `acl:excludeAgent` and `acl:excludeAgentClass` predicates to exclude agent(s)
+    from an `acl:Authorization` even if otherwise allowed, except
+    `acl:agentClass foaf:Agent` allows access to all.
+
+For more information, see [`acl-additions.ttl`](acl-additions.ttl).
+
 
 The following permission modes are required to satisfy the following accesses:
 

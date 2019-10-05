@@ -11,4 +11,4 @@
 	acl:agentClass foaf:Agent; # anyone can read this directory.
 	acl:mode       acl:Read, acl:Search;
 	acl:origin     "*";
-	acl:default    <./>. # unless overridden, anyone can read any subdir or file.
+	acl:default    true . # unless overridden, anyone can read any subdir or file.

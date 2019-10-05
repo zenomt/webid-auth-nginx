@@ -44,6 +44,7 @@ import urllib
 import urllib2
 import urlparse
 
+from fnmatch import fnmatchcase
 from jose import jwt, jws
 
 from twisted.internet import reactor
@@ -56,6 +57,9 @@ from twisted.web.http_headers import Headers
 
 
 RANDOM_TOKEN_LENGTH = 30
+
+NONE_TAG     = binascii.hexlify(os.urandom(RANDOM_TOKEN_LENGTH))
+NONE_APP_TAG = NONE_TAG + "-app"
 
 ACL_MODE           = rdflib.URIRef('http://www.w3.org/ns/auth/acl#mode')
 ACL_APP            = rdflib.URIRef('http://www.w3.org/ns/auth/acl#app')
@@ -75,9 +79,25 @@ FOAF_AGENT         = rdflib.URIRef('http://xmlns.com/foaf/0.1/Agent')
 SOLID_OIDCISSUER   = rdflib.URIRef('http://www.w3.org/ns/solid/terms#oidcIssuer')
 VCARD_HASMEMBER    = rdflib.URIRef('http://www.w3.org/2006/vcard/ns#hasMember')
 
+ACL_AUTHENTICATEDAGENT = rdflib.URIRef('http://www.w3.org/ns/auth/acl#AuthenticatedAgent')
+ACL_ACCESSTOCLASS      = rdflib.URIRef('http://www.w3.org/ns/auth/acl#accessToClass')
+ACL_EXCLUDEAGENT       = rdflib.URIRef('http://www.w3.org/ns/auth/acl#excludeAgent')
+ACL_EXCLUDEAGENTGROUP  = rdflib.URIRef('http://www.w3.org/ns/auth/acl#excludeAgentGroup')
+ACL_TAG                = rdflib.URIRef('http://www.w3.org/ns/auth/acl#tag')
+ACL_RESOURCE           = rdflib.URIRef('http://www.w3.org/ns/auth/acl#Resource')
+ACL_SUBRESOURCE        = rdflib.URIRef('http://www.w3.org/ns/auth/acl#SubResource')
+ACL_CONTAINER          = rdflib.URIRef('http://www.w3.org/ns/auth/acl#Container')
+ACL_SUBCONTAINER       = rdflib.URIRef('http://www.w3.org/ns/auth/acl#SubContainer')
+ACL_DOCUMENT           = rdflib.URIRef('http://www.w3.org/ns/auth/acl#Document')
+RDFS_SEEALSO           = rdflib.URIRef('http://www.w3.org/2000/01/rdf-schema#seeAlso')
+
+XSD_TRUE  = rdflib.term.Literal(True)
+XSD_FALSE = rdflib.term.Literal(False)
+
 DEFAULT_NS = {
-	"foaf": rdflib.URIRef('http://xmlns.com/foaf/0.1/'),
 	"acl": rdflib.URIRef('http://www.w3.org/ns/auth/acl#'),
+	"foaf": rdflib.URIRef('http://xmlns.com/foaf/0.1/'),
+	"rdfs": rdflib.URIRef('http://www.w3.org/2000/01/rdf-schema#'),
 	"solid": rdflib.URIRef('http://www.w3.org/ns/solid/terms#'),
 	"vcard": rdflib.URIRef('http://www.w3.org/2006/vcard/ns#')
 }
@@ -85,6 +105,7 @@ DEFAULT_NS = {
 DEFAULT_NS_TTL = """
 @prefix acl: <http://www.w3.org/ns/auth/acl#> .
 @prefix foaf: <http://xmlns.com/foaf/0.1/> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
 @prefix solid: <http://www.w3.org/ns/solid/terms#> .
 @prefix vcard: <http://www.w3.org/2006/vcard/ns#> .
 """
@@ -478,53 +499,88 @@ class AuthResource(resource.Resource):
 			pass
 		return self.send_answer(request, 'not found', code=404)
 
-	def _auth_app_filter(self, sub, appid, app_origin, inherited, graph):
-		if inherited and ((sub, ACL_DEFAULT, None) not in graph):
-			return False
-		if appid: # None means no check needed
-			for obj in graph.objects(sub, ACL_ORIGIN):
-				obj = unicode(obj)
-				if ("*" == obj) or (canonical_origin(obj) == app_origin):
-					return True
-			for obj in graph.objects(sub, ACL_APP):
-				if appid.startswith(unicode(obj)):
-					return True
-			return False
-		return True
-
 	@inlineCallbacks
-	def check_acl_for_perm(self, acl, webid, appid, app_origin, permission, inherited=False):
-		initBindings = dict(perm=permission, webid=webid)
-		auth_app_filter = lambda x: self._auth_app_filter(x[0], appid, app_origin, inherited, acl)
-		filtered_query = lambda q: filter(auth_app_filter, acl.query(q, initNs=DEFAULT_NS, initBindings=initBindings))
+	def check_acl_for_perm(self, aclGraph, webid, appid, app_origin, permission, isDirectory, inherited=False):
+		tags = None
+		def _filter_by_resource_type(authorizations):
+			if isDirectory and inherited:
+				resourceClasses = set((ACL_RESOURCE, ACL_CONTAINER, ACL_SUBRESOURCE, ACL_SUBCONTAINER))
+			elif isDirectory and not inherited:
+				resourceClasses = set((ACL_RESOURCE, ACL_CONTAINER))
+			else:
+				resourceClasses = set((ACL_RESOURCE, ACL_SUBRESOURCE, ACL_DOCUMENT))
 
-		if filtered_query("SELECT DISTINCT ?auth WHERE { ?auth a acl:Authorization; acl:agentClass foaf:Agent; acl:mode ?perm }"):
+			def _filterp(auth):
+				if inherited:
+					aclDefaults = list(aclGraph.objects(auth, ACL_DEFAULT))
+					if (not aclDefaults) or (XSD_FALSE in aclDefaults):
+						return False
+				accessToClasses = set(aclGraph.objects(auth, ACL_ACCESSTOCLASS)) or set((ACL_RESOURCE, )) # what about acl:accessTo?
+				return resourceClasses.intersection(accessToClasses)
+
+			return filter(_filterp, authorizations)
+
+		def _by_app_tags_p(auth):
+			for each in list(aclGraph.objects(auth, ACL_TAG)) or [NONE_TAG]:
+				if any(map(lambda x: fnmatchcase(each, x) or fnmatchcase(x, each), tags)):
+					return True
+			if appid:
+				for each in aclGraph.objects(auth, ACL_ORIGIN):
+					if ("*" == unicode(each)) or (canonical_origin(each) == app_origin):
+						return True
+				for each in aclGraph.objects(auth, ACL_APP):
+					if appid.startswith(each):
+						return True
+
+		# if no [? acl:mode acl:Search] in aclGraph, assume search is granted for all
+		if (permission == ACL_SEARCH) and not any(aclGraph.subjects(ACL_MODE, ACL_SEARCH)):
+			returnValue(self.PERM_OK)
+
+		authorizations = _filter_by_resource_type(aclGraph.subjects(ACL_MODE, permission))
+
+		if (tags is not None) or appid:
+			tags = tags or [NONE_APP_TAG]
+			authorizations = filter(_by_app_tags_p, authorizations)
+
+		if not authorizations:
+			returnValue(self.PERM_NONE)
+
+		if any(map(lambda x: (x, ACL_AGENTCLASS, FOAF_AGENT) in aclGraph, authorizations)):
 			returnValue(self.PERM_OK)
 
 		if not webid:
-			if filtered_query("SELECT DISTINCT ?auth WHERE { ?auth a acl:Authorization; acl:mode ?perm }"):
-				returnValue(self.PERM_AUTH)
-			returnValue(self.PERM_NONE)
+			returnValue(self.PERM_AUTH)
 
-		if filtered_query("SELECT DISTINCT ?auth WHERE { ?auth a acl:Authorization; acl:agentClass acl:AuthenticatedAgent; acl:mode ?perm }"):
-			returnValue(self.PERM_OK)
-
-		if filtered_query("SELECT DISTINCT ?auth WHERE { ?auth a acl:Authorization; acl:agent ?webid; acl:mode ?perm }"):
-			returnValue(self.PERM_OK)
-
-		for (auth, ) in filtered_query("SELECT DISTINCT ?auth WHERE { ?auth a acl:Authorization; acl:agentGroup ?g; acl:mode ?perm }"):
-			for group in acl.objects(auth, ACL_AGENTGROUP):
+		@inlineCallbacks
+		def _member_of_any_group(auth, predicate):
+			for group in aclGraph.objects(auth, predicate):
 				try:
-					group_graph = yield find_local_or_fetch_graph(unicode(group))
-					if (group, VCARD_HASMEMBER, webid) in group_graph:
-						returnValue(self.PERM_OK)
+					groupGraph = yield find_local_or_fetch_graph(unicode(group))
+					if (group, VCARD_HASMEMBER, webid) in groupGraph:
+						returnValue(True)
 				except Exception as e:
-					print "error (ignored) loading group <%s>: %s" % (unicode(group), `e`)
+					print "error loading group <%s>: %s" % (unicode(group), `e`)
+					if predicate == ACL_EXCLUDEAGENTGROUP:
+						print "error loading exclusion group, denying access"
+						returnValue(True)
+			returnValue(False)
 
-		if filtered_query("SELECT DISTINCT ?auth WHERE { ?auth a acl:Authorization; acl:mode ?perm }"):
-			returnValue(self.PERM_NOTYOU)
+		for auth in authorizations:
+			if (auth, ACL_EXCLUDEAGENT, webid) in aclGraph:
+				continue
+			isMember = yield _member_of_any_group(auth, ACL_EXCLUDEAGENTGROUP)
+			if isMember:
+				continue
 
-		returnValue(self.PERM_NONE)
+			if (auth, ACL_AGENTCLASS, ACL_AUTHENTICATEDAGENT) in aclGraph:
+				returnValue(self.PERM_OK)
+			if (auth, ACL_AGENT, webid) in aclGraph:
+				returnValue(self.PERM_OK)
+			isMember = yield _member_of_any_group(auth, ACL_AGENTGROUP)
+			if isMember:
+				returnValue(self.PERM_OK)
+
+		returnValue(self.PERM_NOTYOU)
 
 	@inlineCallbacks
 	def check_permission(self, method, uri, webid, appid):
@@ -553,14 +609,14 @@ class AuthResource(resource.Resource):
 				cachedReadable = False
 				lastACL = load_local_graph(aclFilename, aclURI, format='turtle')
 				if not args.always_search:
-					reason = yield self.check_acl_for_perm(lastACL, webid, appid, app_origin, ACL_SEARCH)
+					reason = yield self.check_acl_for_perm(lastACL, webid, appid, app_origin, ACL_SEARCH, True)
 					if reason is not self.PERM_OK:
 						returnValue((reason, None))
 			elif not lastACL:
 				raise ValueError("missing root ACL (%s) <%s>?" % (aclFilename, aclURI))
 			elif not cachedReadable:
 				if not args.always_search:
-					reason = yield self.check_acl_for_perm(lastACL, webid, appid, app_origin, ACL_SEARCH, inherited=True)
+					reason = yield self.check_acl_for_perm(lastACL, webid, appid, app_origin, ACL_SEARCH, True, inherited=True)
 					if reason is not self.PERM_OK:
 						returnValue((reason, None))
 				cachedReadable = True
@@ -581,7 +637,7 @@ class AuthResource(resource.Resource):
 			else:
 				using_inherited = True
 
-		check_for = lambda perm: self.check_acl_for_perm(lastACL, webid, appid, app_origin, perm, inherited=using_inherited)
+		check_for = lambda perm: self.check_acl_for_perm(lastACL, webid, appid, app_origin, perm, not leaf, inherited=using_inherited)
 
 		if   need_control:
 			mode = ACL_CONTROL
