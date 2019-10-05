@@ -61,7 +61,7 @@ The server implements [Web Access Control][WAC] with several modifications:
     from an `acl:Authorization` even if otherwise allowed, except
     `acl:agentClass foaf:Agent` allows access to all.
 
-For more information, see [`acl-additions.ttl`](acl-additions.ttl).
+For more information, see [`acl-changes.ttl`](acl-changes.ttl).
 
 
 The following permission modes are required to satisfy the following accesses:
