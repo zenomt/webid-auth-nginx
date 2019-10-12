@@ -51,7 +51,7 @@
 	         acl:default       true .""" .
 
 	acl:excludeAgent a rdf:Property;
-	  :comment"No Authorization, where the Agent is the object of this triple, shall be eligible to authorize an Access.";
+	  :comment "No Authorization, where the Agent is the object of this triple, shall be eligible to authorize an Access.";
 	  :domain acl:Authorization;
 	  :range: foaf:Agent .
 
