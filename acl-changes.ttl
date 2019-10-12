@@ -51,22 +51,20 @@
 	         acl:default       true .""" .
 
 	acl:excludeAgent a rdf:Property;
-	  :comment """The agent is excluded from this Authorization even if allowed by acl:agent, acl:agentGroup,
-	    or acl:agentClass acl:AuthenticatedAgent. However, acl:agentClass foaf:Agent overrides acl:excludeAgent.""";
+	  :comment"No Authorization, where the Agent is the object of this triple, shall be eligible to authorize an Access.";
 	  :domain acl:Authorization;
 	  :range: foaf:Agent .
 
 	acl:excludeAgentGroup a rdf:Property;
-	  :comment """All members of the group are excluded from this Authorization even if allowed by acl:agent,
-	    acl:agentGroup, or acl:agentClass acl:AuthenticatedAgent. However, acl:agentClass foaf:Agent
-	    overrides acl:excludeAgentGroup.""";
+	  :comment """No Authorization, where the Agent is a member of the Group that is the object of this
+	    triple, shall be eligible to authorize an Access.""";
 	  :domain acl:Authorization;
 	  :range <http://www.w3.org/2006/vcard/ns#Group> .
 
 	acl:app a rdf:Property;
 	  :comment """EXPERIMENTAL alternative for acl:origin. An Authorization is eligible to be
 	    selected if this exactly matches the beginning of the app identifier URI (for example,
-	    an OAuth2 redirect_uri). For example, 'acl:app "https://foo.example/oauth/" matches
+	    an OAuth2 redirect_uri). For example, 'acl:app "https://foo.example/oauth/"' matches
 	    an app identifier of <https://foo.example/oauth/redirect.html>.""";
 	  :domain acl:Authorization;
 	  :range :Literal .

@@ -544,17 +544,19 @@ class AuthResource(resource.Resource):
 		if not authorizations:
 			returnValue(self.PERM_NONE)
 
-		if any(map(lambda x: (x, ACL_AGENTCLASS, FOAF_AGENT) in aclGraph, authorizations)):
-			returnValue(self.PERM_OK)
-
 		if not webid:
+			if any(map(lambda x: (x, ACL_AGENTCLASS, FOAF_AGENT) in aclGraph, authorizations)):
+				returnValue(self.PERM_OK)
 			returnValue(self.PERM_AUTH)
 
 		@inlineCallbacks
 		def _member_of_any_group(auth, predicate):
 			for group in aclGraph.objects(auth, predicate):
 				try:
-					groupGraph = yield find_local_or_fetch_graph(unicode(group))
+					if (group, None, None) in aclGraph:
+						groupGraph = aclGraph
+					else:
+						groupGraph = yield find_local_or_fetch_graph(unicode(group))
 					if (group, VCARD_HASMEMBER, webid) in groupGraph:
 						returnValue(True)
 				except Exception as e:
@@ -567,16 +569,18 @@ class AuthResource(resource.Resource):
 		for auth in authorizations:
 			if (auth, ACL_EXCLUDEAGENT, webid) in aclGraph:
 				continue
-			isMember = yield _member_of_any_group(auth, ACL_EXCLUDEAGENTGROUP)
-			if isMember:
+			isExcludedGroupMember = yield _member_of_any_group(auth, ACL_EXCLUDEAGENTGROUP)
+			if isExcludedGroupMember:
 				continue
 
+			if (auth, ACL_AGENTCLASS, FOAF_AGENT) in aclGraph:
+				returnValue(self.PERM_OK)
 			if (auth, ACL_AGENTCLASS, ACL_AUTHENTICATEDAGENT) in aclGraph:
 				returnValue(self.PERM_OK)
 			if (auth, ACL_AGENT, webid) in aclGraph:
 				returnValue(self.PERM_OK)
-			isMember = yield _member_of_any_group(auth, ACL_AGENTGROUP)
-			if isMember:
+			isGroupMember = yield _member_of_any_group(auth, ACL_AGENTGROUP)
+			if isGroupMember:
 				returnValue(self.PERM_OK)
 
 		returnValue(self.PERM_NOTYOU)

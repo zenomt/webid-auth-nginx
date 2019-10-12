@@ -33,7 +33,7 @@ Web Access Control
 ------------------
 The server implements [Web Access Control][WAC] with several modifications:
 
-  - The `acl`, `foaf`, `solid`, and `vcard` prefixes are pre-defined for convenience;
+  - The `acl:`, `foaf:`, 'rdfs:`, `solid:`, and `vcard:` prefixes are pre-defined for convenience;
   - `acl:Search` permission is required for every directory from the base prefix
     down to the location of the requested resource (this permission is inferred for
     all if it doesn't appear anywhere in the access control file);
@@ -58,8 +58,7 @@ The server implements [Web Access Control][WAC] with several modifications:
     * `acl:SubContainer` - the class of all containers excluding the one whose
       Access Control Resource this is.
   - `acl:excludeAgent` and `acl:excludeAgentClass` predicates to exclude agent(s)
-    from an `acl:Authorization` even if otherwise allowed, except
-    `acl:agentClass foaf:Agent` allows access to all.
+    from an `acl:Authorization` even if otherwise allowed.
 
 For more information, see [`acl-changes.ttl`](acl-changes.ttl).
 
