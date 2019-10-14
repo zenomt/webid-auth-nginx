@@ -33,7 +33,7 @@ Web Access Control
 ------------------
 The server implements [Web Access Control][WAC] with several modifications:
 
-  - The `acl:`, `foaf:`, 'rdfs:`, `solid:`, and `vcard:` prefixes are pre-defined for convenience;
+  - The `acl:`, `foaf:`, `rdfs:`, `solid:`, and `vcard:` prefixes are pre-defined for convenience;
   - `acl:Search` permission is required for every directory from the base prefix
     down to the location of the requested resource (this permission is inferred for
     all if it doesn't appear anywhere in the access control file);
