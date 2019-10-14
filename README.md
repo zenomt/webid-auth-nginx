@@ -59,6 +59,14 @@ The server implements [Web Access Control][WAC] with several modifications:
       Access Control Resource this is.
   - `acl:excludeAgent` and `acl:excludeAgentClass` predicates to exclude agent(s)
     from an `acl:Authorization` even if otherwise allowed.
+  - `rdfs:seeAlso` (with subject being the Access Control Resource document URI) can be
+    used to reference other access control files, in order to allow for reuse
+    and composition of access control policies. Only local files are loaded
+    (remote URIs are not loaded).  `rdfs:seeAlso` is not evaluated recursively
+    (that is, any `rdfs:seeAlso`s in loaded policy sub-documents are not
+    followed).  The merge of the primary access control graph and the graphs
+    of those documents directly referenced from the primary is queried to
+    make an access control determination.
 
 For more information, see [`acl-changes.ttl`](acl-changes.ttl).
 

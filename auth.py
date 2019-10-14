@@ -306,6 +306,15 @@ def try_find_local_graph(uri):
 			debug_log("trying to load local graph <%s> (%s)", uri, path)
 			return load_local_graph(path, uri)
 
+def load_local_graph_ext(path, publicID, format=None):
+	rv = load_local_graph(path, publicID, format)
+	for see_also in list(rv.objects(rdflib.URIRef(publicID), RDFS_SEEALSO)):
+		otherGraph = try_find_local_graph(unicode(see_also))
+		if not otherGraph:
+			raise ValueError("couldn't find rdfs:seeAlso graph %s locally" % (see_also, ))
+		rv += otherGraph
+	return rv
+
 def expire_fetch_graph_cache():
 	now = time.time()
 	for k in list(fetch_graph_cache.keys()):
@@ -610,7 +619,7 @@ class AuthResource(resource.Resource):
 			aclURI = urlparse.urljoin(aclURI, (dir_ or '.') + '/' + args.acl_suffix)
 			if posixpath.isfile(aclFilename):
 				cachedReadable = False
-				lastACL = load_local_graph(aclFilename, aclURI, format='turtle')
+				lastACL = load_local_graph_ext(aclFilename, aclURI, format='turtle')
 				reason = yield self.check_acl_for_perm(lastACL, webid, appid, app_origin, ACL_SEARCH, True)
 				if reason is not self.PERM_OK:
 					returnValue((reason, None))
@@ -633,7 +642,7 @@ class AuthResource(resource.Resource):
 			aclFilename = posixpath.join(current_dir, leaf)
 			aclURI = urlparse.urljoin(aclURI, leaf)
 			if posixpath.isfile(aclFilename):
-				lastACL = load_local_graph(aclFilename, aclURI, format='turtle')
+				lastACL = load_local_graph_ext(aclFilename, aclURI, format='turtle')
 				using_inherited = False
 			else:
 				using_inherited = True
