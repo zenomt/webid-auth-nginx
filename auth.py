@@ -83,6 +83,7 @@ ACL_AUTHENTICATEDAGENT = rdflib.URIRef('http://www.w3.org/ns/auth/acl#Authentica
 ACL_ACCESSTOCLASS      = rdflib.URIRef('http://www.w3.org/ns/auth/acl#accessToClass')
 ACL_EXCLUDEAGENT       = rdflib.URIRef('http://www.w3.org/ns/auth/acl#excludeAgent')
 ACL_EXCLUDEAGENTGROUP  = rdflib.URIRef('http://www.w3.org/ns/auth/acl#excludeAgentGroup')
+ACL_EXCLUDEORIGIN      = rdflib.URIRef('http://www.w3.org/ns/auth/acl#excludeOrigin')
 ACL_TAG                = rdflib.URIRef('http://www.w3.org/ns/auth/acl#tag')
 ACL_RESOURCE           = rdflib.URIRef('http://www.w3.org/ns/auth/acl#Resource')
 ACL_SUBRESOURCE        = rdflib.URIRef('http://www.w3.org/ns/auth/acl#SubResource')
@@ -529,6 +530,8 @@ class AuthResource(resource.Resource):
 			return filter(_filterp, authorizations)
 
 		def _by_app_tags_p(auth):
+			if app_origin and any(map(lambda x: canonical_origin(x) == app_origin, aclGraph.objects(auth, ACL_EXCLUDEORIGIN))):
+				return False
 			for each in list(aclGraph.objects(auth, ACL_TAG)) or [NONE_TAG]:
 				if any(map(lambda x: fnmatchcase(each, x) or fnmatchcase(x, each), tags)):
 					return True

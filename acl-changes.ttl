@@ -61,6 +61,11 @@
 	  :domain acl:Authorization;
 	  :range <http://www.w3.org/2006/vcard/ns#Group> .
 
+	acl:excludeOrigin a rdf:Property;
+	  :comment "No Authorization, where the origin of the application is the object of this triple, shall be eligible to authorize an Access.";
+	  :domain acl:Authorization;
+	  :range: acl:Origin .
+
 	acl:app a rdf:Property;
 	  :comment """EXPERIMENTAL alternative for acl:origin. An Authorization is eligible to be
 	    selected if this exactly matches the beginning of the app identifier URI (for example,

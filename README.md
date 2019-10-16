@@ -63,7 +63,9 @@ The server implements [Web Access Control][WAC] with several modifications:
     * `acl:SubContainer` - the class of all containers excluding the one whose
       Access Control Resource this is.
   - `acl:excludeAgent` and `acl:excludeAgentClass` predicates to exclude agent(s)
-    from an `acl:Authorization` even if otherwise allowed.
+    from an `acl:Authorization` even if otherwise allowed;
+  - `acl:excludeOrigin` predicate to exclude an effective request origin even if
+    otherwise allowed;
   - `rdfs:seeAlso` (with subject being the Access Control Resource document URI) can be
     used to reference other access control files, in order to allow for reuse
     and composition of access control policies. Only local files are loaded
