@@ -40,10 +40,15 @@ The server implements [Web Access Control][WAC] with several modifications:
   - `acl:Read` permission in an ACL file also grants read for that ACL file;
   - `acl:Other` permission mode for any method that doesn't fall under
     `acl:Read`, `acl:Write`, or `acl:Append`;
-  - `acl:origin` objects can be URIs or string literals;
-  - `acl:origin` can be the special literal `"*"`, which matches all origins;
+  - Origins are handled differently:
+    * There is always an effective Request Origin, which is either the origin of the
+      [application identifier][zenomt-auth], or the `Origin` request header,
+      or the origin of the target URI;
+    * `acl:origin` objects can be URIs or string literals;
+    * `acl:origin` can be the special literal `"*"`, which matches all origins;
+    * `acl:origin` can be the special literal `"@"`, which matches the target URI's origin;
   - `acl:app` for [application identifier][zenomt-auth] prefixes (only usable
-    with [WebID Authorization Protocol][zenomt-auth] bearer tokens).
+    with [WebID Authorization Protocol][zenomt-auth] bearer tokens);
   - `acl:default`'s value can now be an `xsd:boolean` (default `false`); any
     non-`false` value makes the `acl:Authorization` eligible for consideration
     when inherited;

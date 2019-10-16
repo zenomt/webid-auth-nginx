@@ -508,8 +508,8 @@ class AuthResource(resource.Resource):
 		return self.send_answer(request, 'not found', code=404)
 
 	@inlineCallbacks
-	def check_acl_for_perm(self, aclGraph, webid, appid, app_origin, permission, isDirectory, inherited=False):
-		tags = None
+	def check_acl_for_perm(self, aclGraph, origin, webid, appid, app_origin, permission, isDirectory, inherited=False):
+		tags = None # TODO: tags
 		def _filter_by_resource_type(authorizations):
 			if isDirectory and inherited:
 				resourceClasses = set((ACL_RESOURCE, ACL_CONTAINER, ACL_SUBRESOURCE, ACL_SUBCONTAINER))
@@ -536,6 +536,8 @@ class AuthResource(resource.Resource):
 				for each in aclGraph.objects(auth, ACL_ORIGIN):
 					if ("*" == unicode(each)) or (canonical_origin(each) == app_origin):
 						return True
+					if ("@" == unicode(each)) and (origin == app_origin):
+						return True
 				for each in aclGraph.objects(auth, ACL_APP):
 					if appid.startswith(each):
 						return True
@@ -545,13 +547,13 @@ class AuthResource(resource.Resource):
 			returnValue(self.PERM_OK)
 
 		authorizations = _filter_by_resource_type(aclGraph.subjects(ACL_MODE, permission))
+		anyAuths = bool(authorizations)
 
-		if (tags is not None) or appid:
-			tags = tags or [NONE_APP_TAG]
-			authorizations = filter(_by_app_tags_p, authorizations)
+		tags = tags or [NONE_APP_TAG]
+		authorizations = filter(_by_app_tags_p, authorizations)
 
 		if not authorizations:
-			returnValue(self.PERM_NONE)
+			returnValue(self.PERM_NOTYOU if webid and anyAuths else self.PERM_NONE)
 
 		if not webid:
 			if any(map(lambda x: (x, ACL_AGENTCLASS, FOAF_AGENT) in aclGraph, authorizations)):
@@ -612,6 +614,7 @@ class AuthResource(resource.Resource):
 		cachedReadable = False
 		current_dir = location['root']
 		app_origin = canonical_origin(appid) if appid else None
+		origin = location['origin']
 
 		for dir_ in path:
 			current_dir = posixpath.join(current_dir, dir_ )
@@ -620,13 +623,13 @@ class AuthResource(resource.Resource):
 			if posixpath.isfile(aclFilename):
 				cachedReadable = False
 				lastACL = load_local_graph_ext(aclFilename, aclURI, format='turtle')
-				reason = yield self.check_acl_for_perm(lastACL, webid, appid, app_origin, ACL_SEARCH, True)
+				reason = yield self.check_acl_for_perm(lastACL, origin, webid, appid, app_origin, ACL_SEARCH, True)
 				if reason is not self.PERM_OK:
 					returnValue((reason, None))
 			elif not lastACL:
 				raise ValueError("missing root ACL (%s) <%s>?" % (aclFilename, aclURI))
 			elif not cachedReadable:
-				reason = yield self.check_acl_for_perm(lastACL, webid, appid, app_origin, ACL_SEARCH, True, inherited=True)
+				reason = yield self.check_acl_for_perm(lastACL, origin, webid, appid, app_origin, ACL_SEARCH, True, inherited=True)
 				if reason is not self.PERM_OK:
 					returnValue((reason, None))
 				cachedReadable = True
@@ -647,7 +650,7 @@ class AuthResource(resource.Resource):
 			else:
 				using_inherited = True
 
-		check_for = lambda perm: self.check_acl_for_perm(lastACL, webid, appid, app_origin, perm, not leaf, inherited=using_inherited)
+		check_for = lambda perm: self.check_acl_for_perm(lastACL, origin, webid, appid, app_origin, perm, not leaf, inherited=using_inherited)
 
 		if   need_control:
 			mode = ACL_CONTROL
@@ -707,7 +710,7 @@ class AuthResource(resource.Resource):
 		method = request.getHeader('X-Original-Method')
 		if not method:
 			raise ValueError("X-Original-Method header missing")
-		appid = request.access_token_row['appid'] if request.access_token_row else request.getHeader('Origin')
+		appid = request.access_token_row['appid'] if request.access_token_row else request.getHeader('Origin') or canonical_origin(uri)
 		webid = rdflib.URIRef(request.session_webid) if status == self.STATUS_OK else None
 
 		def send_auth_answer(code, authMode=None, info=None):
