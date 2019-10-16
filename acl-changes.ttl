@@ -62,23 +62,23 @@
 	  :range <http://www.w3.org/2006/vcard/ns#Group> .
 
 	acl:excludeOrigin a rdf:Property;
-	  :comment "No Authorization, where the origin of the application is the object of this triple, shall be eligible to authorize an Access.";
+	  :comment "No Authorization, where the effective origin of the request is the object of this triple, shall be eligible to authorize an Access.";
 	  :domain acl:Authorization;
 	  :range: acl:Origin .
 
 	acl:app a rdf:Property;
-	  :comment """EXPERIMENTAL alternative for acl:origin. An Authorization is eligible to be
-	    selected if this exactly matches the beginning of the app identifier URI (for example,
+	  :comment """EXPERIMENTAL alternative for acl:origin. An Authorization may be considered for
+	    selection if this exactly matches the beginning of the app identifier URI (for example,
 	    an OAuth2 redirect_uri). For example, 'acl:app "https://foo.example/oauth/"' matches
 	    an app identifier of <https://foo.example/oauth/redirect.html>.""";
 	  :domain acl:Authorization;
 	  :range :Literal .
 
 	acl:tag a rdf:Property;
-	  :comment """EXPERIMENTAL replacement for acl:origin. A tag or scope specification.
-		An Authorization is eligible to be selected if the application matches the tag.
-		The method by which tags are matched with applications, and the method by which
-		applications are tagged, are reserved for the implementation.""";
+	  :comment """EXPERIMENTAL alternative for acl:origin. A tag or scope specification.
+	    An Authorization may be considered for selection if the application matches the tag.
+	    The method by which tags are matched with applications, and the method by which
+	    applications are tagged, are reserved for the implementation.""";
 	  :domain acl:Authorization;
 	  :range :Literal .
 
