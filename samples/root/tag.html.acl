@@ -1,0 +1,10 @@
+# restrict reading tag.html to any authenticated agent as
+# long as they've tagged the app they're using appropriately.
+
+[]
+	a              acl:Authorization;
+	acl:agentClass acl:AuthenticatedAgent;
+	acl:mode       acl:Read;
+	acl:tag
+		"Chat.Read", # matches app tag "Chat.Read" or "Chat.*" or "*.Read" or "*"
+		"Demo.*" .   # matches app tag "Demo.Anything" or "Demo.*" or "*".

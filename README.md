@@ -49,6 +49,8 @@ The server implements [Web Access Control][WAC] with several modifications:
     * `acl:origin` can be the special literal `"@"`, which matches the target URI's origin;
   - `acl:app` for [application identifier][zenomt-auth] prefixes (only usable
     with [WebID Authorization Protocol][zenomt-auth] bearer tokens);
+  - `acl:tag` for app tags/scopes. See [application tagging](#application-tagging)
+    below for more information. This is only usable with bearer tokens.
   - `acl:default`'s value can now be an `xsd:boolean` (default `false`); any
     non-`false` value makes the `acl:Authorization` eligible for consideration
     when inherited;
@@ -91,6 +93,65 @@ The following permission modes are required to satisfy the following accesses:
   - `acl:Append` for methods `PUT`, `POST`, `PATCH`, `PROPPATCH`, `MKCOL`,
     if `acl:Write` permission isn't granted.
   - `acl:Other` for any other methods.
+
+### Application Tagging
+
+As a proof-of-concept, the server implements an experimental method for letting
+the user control the scopes for which an application she is using has permission.
+
+The resource owner/controller can specify one or more tag patterns for an
+`acl:Authorization` instead of an `acl:origin` or `acl:app`. If any of the
+tag patterns that the user has assigned to the app that she's using matches
+any of the tag patterns in the `acl:Authorization`, then it's as if there was
+an `acl:app` match. Note that there is no global vocabulary of tags/scopes;
+tags are arbitrary, and what tags to assign to authorizations is entirely at
+the discretion of a resource owner. Tags **SHOULD** have the same meaning at
+least across resources in the same origin and [protection space (realm)][realm].
+
+The user associates tag patterns for the combination of an app, resource
+server origin, and security realm (the name of the [protection space][realm];
+the `realm` authentication parameter of the `WWW-Authenticate` HTTP response
+header) in an App Authorization document. Here is an example App Authorization
+document assigning tag patterns `Photos.Read` and `Chat.*` to
+app `https://app.example/oauth/code` on server `https://mike.example`'s
+realm `https://mike.example/auth/`:
+
+	# this is world-readable but has an unguessable URI like
+	#     <https://mike.example/wac/app-auth/b6d88441302c07700743b8d793ae2a8a.ttl>
+	# in a non-listable container.
+	
+	@prefix acl: <http://www.w3.org/ns/auth/acl#> .
+	
+	[]
+	    a acl:AppAuthorization;
+	    acl:resourceServer [
+	        acl:origin <https://mike.example>;
+	        acl:realm "https://mike.example/auth/"
+	    ];
+	    acl:app "https://app.example/oauth/code";
+	    acl:tag "Photos.Read", "Chat.*" .
+
+Note that `auth.py` uses its base URL as its realm.
+
+The URI for the App Authorization document **MUST** be in (at a sub-path of)
+an `acl:appAuthorizations` in the user's profile:
+
+	<#me> acl:appAuthorizations </wac/app-auth/> .
+
+This container/directory **SHOULD** be configured to allow read of App
+Authorization documents by anyone and any origin; however, to protect the
+user's privacy (specifically, what apps the user uses and what resource servers
+the user accesses with those apps) including from other apps the user uses,
+listing the container's contents should be restricted to only the user, and
+then to only the user's trusted authorization management app.
+
+The method by which an app discovers its App Authorization document URIs is
+to be determined.
+
+To associate tags with a `Bearer` access token, the app sets the (new,
+experimental) `app_authorizations` key in the *proof-token* (sent to the
+`webid-pop` endpoint) to the URI of the App Authorization document appropriate
+for this server.
 
 `auth.py`
 ---------
@@ -324,7 +385,7 @@ Add your RSA public key and self-issuer URI to your WebID profile:
 Now you're ready to get an access token. Using the example configuration from
 above and the [samples](samples) directory:
 
-	$ python client.py -k data/client-private.pem -w 'https://mike.example/card.ttl#me' https://mike.example/wac/check.html
+	$ python client.py -k data/client-private.pem -w 'https://mike.example/card.ttl#me' https://mike.example/wac/check.html -A https://mike.example/wac/app-auth/b6d88441302c07700743b8d793ae2a8a.ttl
 	{
 	    "access_token": "a0wBCgJajBtKX2PZ1-Uy6ATW2unYMeFxqyAXoV12",
 	    "token_type": "Bearer",
@@ -347,3 +408,4 @@ any others for which this auth server is configured, for the next 180 seconds:
   [WebID-OIDC]:  https://github.com/solid/webid-oidc-spec
   [zenomt-auth]: https://github.com/zenomt/webid-auth-protocol
   [self-issued]: https://openid.net/specs/openid-connect-core-1_0.html#SelfIssued
+  [realm]:       https://tools.ietf.org/html/rfc7235#section-2.2

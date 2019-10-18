@@ -1,0 +1,10 @@
+@prefix acl: <http://www.w3.org/ns/auth/acl#> .
+
+[]
+	a acl:AppAuthorization;
+	acl:resourceServer [
+		acl:origin <https://mike.example>;
+		acl:realm "https://mike.example/auth/"
+	];
+	acl:app "https://app.example/oauth/code"; # NB the default app-id of client.py.
+	acl:tag "Photos.Read", "Chat.*" .

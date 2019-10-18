@@ -57,6 +57,7 @@ from twisted.web.http_headers import Headers
 
 
 RANDOM_TOKEN_LENGTH = 30
+PROOF_TOKEN_APP_AUTHORIZATIONS = "app_authorizations"
 
 NONE_TAG     = binascii.hexlify(os.urandom(RANDOM_TOKEN_LENGTH))
 NONE_APP_TAG = NONE_TAG + "-app"
@@ -91,6 +92,12 @@ ACL_CONTAINER          = rdflib.URIRef('http://www.w3.org/ns/auth/acl#Container'
 ACL_SUBCONTAINER       = rdflib.URIRef('http://www.w3.org/ns/auth/acl#SubContainer')
 ACL_DOCUMENT           = rdflib.URIRef('http://www.w3.org/ns/auth/acl#Document')
 RDFS_SEEALSO           = rdflib.URIRef('http://www.w3.org/2000/01/rdf-schema#seeAlso')
+
+# support for user-controlled app tags
+ACL_APPAUTHORIZATION   = rdflib.URIRef('http://www.w3.org/ns/auth/acl#AppAuthorization')
+ACL_APPAUTHORIZATIONS  = rdflib.URIRef('http://www.w3.org/ns/auth/acl#appAuthorizations')
+ACL_RESOURCESERVER     = rdflib.URIRef('http://www.w3.org/ns/auth/acl#resourceServer')
+ACL_REALM              = rdflib.URIRef('http://www.w3.org/ns/auth/acl#realm')
 
 XSD_TRUE  = rdflib.term.Literal(True)
 XSD_FALSE = rdflib.term.Literal(False)
@@ -181,6 +188,9 @@ def canonical_origin_parsed(urlparts):
 
 def canonical_origin(uri):
 	return canonical_origin_parsed(urlparse.urlparse(uri))
+
+def is_suburi(base, uri):
+	return '/../' not in uri and uri.startswith(base if base.endswith('/') else base + '/')
 
 def load_local_graph(path, publicID, format=None):
 	try:
@@ -509,8 +519,7 @@ class AuthResource(resource.Resource):
 		return self.send_answer(request, 'not found', code=404)
 
 	@inlineCallbacks
-	def check_acl_for_perm(self, aclGraph, origin, webid, appid, app_origin, permission, isDirectory, inherited=False):
-		tags = None # TODO: tags
+	def check_acl_for_perm(self, aclGraph, origin, webid, appid, app_origin, tags, permission, isDirectory, inherited=False):
 		def _filter_by_resource_type(authorizations):
 			if isDirectory and inherited:
 				resourceClasses = set((ACL_RESOURCE, ACL_CONTAINER, ACL_SUBRESOURCE, ACL_SUBCONTAINER))
@@ -556,7 +565,9 @@ class AuthResource(resource.Resource):
 		authorizations = filter(_by_app_tags_p, authorizations)
 
 		if not authorizations:
-			returnValue(self.PERM_NOTYOU if webid and anyAuths else self.PERM_NONE)
+			if anyAuths:
+				returnValue(self.PERM_NOTYOU if webid else self.PERM_AUTH)
+			returnValue(self.PERM_NONE)
 
 		if not webid:
 			if any(map(lambda x: (x, ACL_AGENTCLASS, FOAF_AGENT) in aclGraph, authorizations)):
@@ -600,7 +611,7 @@ class AuthResource(resource.Resource):
 		returnValue(self.PERM_NOTYOU)
 
 	@inlineCallbacks
-	def check_permission(self, method, uri, webid, appid):
+	def check_permission(self, method, uri, webid, appid, tags):
 		location = find_location(uri) # { origin, prefix, root, base, path, query }
 		if not location:
 			raise ValueError("missing configuration for <%s>" % (uri, ))
@@ -626,13 +637,13 @@ class AuthResource(resource.Resource):
 			if posixpath.isfile(aclFilename):
 				cachedReadable = False
 				lastACL = load_local_graph_ext(aclFilename, aclURI, format='turtle')
-				reason = yield self.check_acl_for_perm(lastACL, origin, webid, appid, app_origin, ACL_SEARCH, True)
+				reason = yield self.check_acl_for_perm(lastACL, origin, webid, appid, app_origin, tags, ACL_SEARCH, True)
 				if reason is not self.PERM_OK:
 					returnValue((reason, None))
 			elif not lastACL:
 				raise ValueError("missing root ACL (%s) <%s>?" % (aclFilename, aclURI))
 			elif not cachedReadable:
-				reason = yield self.check_acl_for_perm(lastACL, origin, webid, appid, app_origin, ACL_SEARCH, True, inherited=True)
+				reason = yield self.check_acl_for_perm(lastACL, origin, webid, appid, app_origin, tags, ACL_SEARCH, True, inherited=True)
 				if reason is not self.PERM_OK:
 					returnValue((reason, None))
 				cachedReadable = True
@@ -653,7 +664,7 @@ class AuthResource(resource.Resource):
 			else:
 				using_inherited = True
 
-		check_for = lambda perm: self.check_acl_for_perm(lastACL, origin, webid, appid, app_origin, perm, not leaf, inherited=using_inherited)
+		check_for = lambda perm: self.check_acl_for_perm(lastACL, origin, webid, appid, app_origin, tags, perm, not leaf, inherited=using_inherited)
 
 		if   need_control:
 			mode = ACL_CONTROL
@@ -682,6 +693,8 @@ class AuthResource(resource.Resource):
 			request.access_token_row = db.cursor().execute("SELECT * FROM access_token WHERE access_token = ?", (access_token, )).fetchone()
 			if request.access_token_row:
 				request.session_webid = request.access_token_row['webid']
+				tags = db.cursor().execute("SELECT * FROM app_tag WHERE access_token_id = ?", (request.access_token_row['id'], )).fetchall()
+				request.app_tags = map(lambda x: x['tag'], tags)
 				return self.STATUS_OK
 			return self.STATUS_BAD_TOKEN
 
@@ -736,7 +749,7 @@ class AuthResource(resource.Resource):
 		if status == self.STATUS_BAD_TOKEN:
 			returnValue(send_auth_answer(401, authMode=self.MODE_TOKEN))
 
-		perm, mode = yield self.check_permission(method, uri, webid, appid)
+		perm, mode = yield self.check_permission(method, uri, webid, appid, request.app_tags)
 
 		if perm == self.PERM_OK:
 			info = dict(webid=webid, appid=appid, mode=mode)
@@ -1068,6 +1081,29 @@ class AuthResource(resource.Resource):
 			(parts1.query == parts2.query)
 
 	@inlineCallbacks
+	def load_app_tags(self, proof_claims, card, webid, appid, origin):
+		webid = rdflib.URIRef(webid)
+		app_origin = canonical_origin(appid)
+		realm = rdflib.term.Literal(args.url)
+		rv = set()
+		try:
+			app_authorization_uri = proof_claims.get(PROOF_TOKEN_APP_AUTHORIZATIONS)
+			if app_authorization_uri and any(map(lambda x: is_suburi(x, app_authorization_uri), card.objects(webid, ACL_APPAUTHORIZATIONS))):
+				authGraph = yield fetch_graph_cached_shared(app_authorization_uri)
+				for auth, server in authGraph.subject_objects(ACL_RESOURCESERVER):
+					if not any(map(lambda x: canonical_origin(x) == origin, authGraph.objects(server, ACL_ORIGIN))):
+						continue
+					if (server, ACL_REALM, realm) not in authGraph:
+						continue
+					if any(map(lambda x: canonical_origin(x) == app_origin, authGraph.objects(auth, ACL_ORIGIN))) or \
+							any(map(lambda x: unicode(x).startswith(appid), authGraph.objects(auth, ACL_APP))):
+						rv.update(map(lambda x: unicode(x), authGraph.objects(auth, ACL_TAG)))
+		except Exception as e:
+			print "exception loading app tags (ignoring)"
+			print traceback.format_exc()
+		returnValue(rv)
+
+	@inlineCallbacks
 	def answer_webid_pop(self, request):
 		trusted_algorithms = ["RS256", "RS384", "RS512", "ES256", "ES384", "ES512"]
 		params = request.args
@@ -1123,16 +1159,24 @@ class AuthResource(resource.Resource):
 			appid = proof_claims['iss']
 			appid = appid if ':' in appid else "unknown:"
 
+			tags = yield self.load_app_tags(proof_claims, card, webid, appid, canonical_origin(uri))
+
 			now = long(time.time())
 			token_expires_on = long(max(now + args.min_token_lifetime, min(now + args.token_lifetime, proof_claims['exp'])))
 			expires_in = long(token_expires_on - now)
 			access_token = random_token()
 
-			db.cursor().execute("INSERT INTO access_token (expires_on, host, access_token, webid, appid) VALUES (?, ?, ?, ?, ?)",
+			c = db.cursor()
+			c.execute("INSERT INTO access_token (expires_on, host, access_token, webid, appid) VALUES (?, ?, ?, ?, ?)",
 				(token_expires_on, self.get_client_addr(request), access_token, webid, appid))
+			access_token_id = c.lastrowid
+
+			for tag in tags:
+				c.execute("INSERT INTO app_tag (access_token_id, tag) VALUES (?, ?)", (access_token_id, tag))
+
 			db.commit()
 
-			print "issue token to: <%s> appid: <%s> lifetime: %s" % (webid, appid, expires_in)
+			print "issue token to: <%s> appid: <%s> lifetime: %s tags: %s" % (webid, appid, expires_in, json.dumps(list(tags)))
 			returnValue(self._send_token_answer(request, access_token=access_token, expires_in=expires_in))
 		except Exception as e:
 			print traceback.format_exc()
@@ -1166,6 +1210,7 @@ class AuthResource(resource.Resource):
 			request.auth_cookie = None
 			request.session_row = None
 			request.session_webid = None
+			request.app_tags = []
 
 			if not request.getHeader('Authorization'):
 				request.auth_cookie = request.getCookie(self.COOKIE)
@@ -1262,6 +1307,14 @@ CREATE TABLE IF NOT EXISTS access_token (
 	webid        TEXT NOT NULL,
 	appid        TEXT
 );
+
+CREATE TABLE IF NOT EXISTS app_tag (
+	id              INTEGER PRIMARY KEY AUTOINCREMENT,
+	access_token_id INTEGER NOT NULL REFERENCES access_token(id) ON DELETE CASCADE,
+	tag             TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS app_tag_token ON app_tag ( access_token_id );
 
 CREATE TABLE IF NOT EXISTS token_challenge (
 	id           INTEGER PRIMARY KEY AUTOINCREMENT,
