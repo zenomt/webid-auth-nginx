@@ -1,6 +1,6 @@
 @prefix acl: <http://www.w3.org/ns/auth/acl#> .
 
-[]
+<#it>
 	a acl:AppAuthorization;
 	acl:resourceServer [
 		acl:origin <https://mike.example>;

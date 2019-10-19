@@ -99,37 +99,53 @@ The following permission modes are required to satisfy the following accesses:
 As a proof-of-concept, the server implements an experimental method for letting
 the user control the scopes for which an application she is using has permission.
 
-The resource owner/controller can specify one or more tag patterns for an
-`acl:Authorization` instead of an `acl:origin` or `acl:app`. If any of the
-tag patterns that the user has assigned to the app that she's using matches
-any of the tag patterns in the `acl:Authorization`, then it's as if there was
-an `acl:app` match. Note that there is no global vocabulary of tags/scopes;
-tags are arbitrary, and what tags to assign to authorizations is entirely at
-the discretion of a resource owner. Tags **SHOULD** have the same meaning at
-least across resources in the same origin and [protection space (realm)][realm].
+The resource owner/controller can specify one or more tag patterns (scopes)
+for an `acl:Authorization` instead of an `acl:origin` or `acl:app`:
+
+	# ACL for a container of chat messages, allowing
+	# read for all authenticated users who are using
+	# an app with a tag pattern that matches "Chat.Read".
+	[]
+		a acl:Authorization;
+		acl:mode acl:Read;
+		acl:agentClass acl:AuthenticatedAgent;
+		acl:accessToClass acl:Resource; # NB this is the default
+
+		# apps the user has tagged "Chat.Read" or "Chat.*" or "*.Read" or
+		# "*" will be allowed.
+		acl:tag "Chat.Read";
+
+	    acl:default true .
+
+If any of the tag patterns that the user has assigned to the app that she's
+using matches any of the tag patterns in the `acl:Authorization`, then it's
+as if there was an `acl:app` match. Note that there is no global vocabulary
+of tags/scopes; tags are arbitrary, and what tags to assign to authorizations
+is entirely at the discretion of a resource owner. Tags **SHOULD** have the
+same meaning at least across resources in the same origin and [realm][].
 
 The user associates tag patterns for the combination of an app, resource
 server origin, and security realm (the name of the [protection space][realm];
-the `realm` authentication parameter of the `WWW-Authenticate` HTTP response
-header) in an App Authorization document. Here is an example App Authorization
-document assigning tag patterns `Photos.Read` and `Chat.*` to
-app `https://app.example/oauth/code` on server `https://mike.example`'s
+that is, the `realm` authentication parameter of the `WWW-Authenticate` HTTP
+response header) in an App Authorization document. Here is an example App
+Authorization document assigning tag patterns `Photos.Read` and `Chat.*` to
+app `https://app.example/oauth/code` when accessing server `https://mike.example`'s
 realm `https://mike.example/auth/`:
 
 	# this is world-readable but has an unguessable URI like
-	#     <https://mike.example/wac/app-auth/b6d88441302c07700743b8d793ae2a8a.ttl>
+	#     <https://mike.example/wac/app-auth/b6d88441302c07700743b8d793ae2a8a.ttl#it>
 	# in a non-listable container.
 	
 	@prefix acl: <http://www.w3.org/ns/auth/acl#> .
 	
-	[]
-	    a acl:AppAuthorization;
-	    acl:resourceServer [
-	        acl:origin <https://mike.example>;
-	        acl:realm "https://mike.example/auth/"
-	    ];
-	    acl:app "https://app.example/oauth/code";
-	    acl:tag "Photos.Read", "Chat.*" .
+	<#it>
+		a acl:AppAuthorization;
+		acl:resourceServer [
+			acl:origin <https://mike.example>;
+			acl:realm "https://mike.example/auth/"
+		];
+		acl:app "https://app.example/oauth/code";
+		acl:tag "Photos.Read", "Chat.*" .
 
 Note that `auth.py` uses its base URL as its realm.
 
@@ -145,13 +161,36 @@ the user accesses with those apps) including from other apps the user uses,
 listing the container's contents should be restricted to only the user, and
 then to only the user's trusted authorization management app.
 
-The method by which an app discovers its App Authorization document URIs is
-to be determined.
+The method by which an app discovers its App Authorization URIs is to be
+determined. It is envisioned that each app will have an App Authorizations
+index file, generated and maintained by the user's trusted authorization
+management app, stored in a non-listable container, with a URI derived from
+the app's identifier, and readable only by the user and only when using that
+app, mapping between App Authorization URIs and resource servers:
+
+	# App Authorizations index file for app "https://app.example/oauth/code".
+	@prefix acl: <http://www.w3.org/ns/auth/acl#> .
+
+	</wac/app-auth/b6d88441302c07700743b8d793ae2a8a.ttl#it>
+		acl:resourceServer [ acl:origin <https://mike.example>; acl:realm "https://mike.example/auth/" ] .
+
+	</wac/app-auth/4f20846c1179e604048a589583dd6f9c.ttl#it>
+		acl:resourceServer [ acl:origin <https://other.example>; acl:realm "Other Server" ] .
+
+The non-listable container for App Authorization index files **SHOULD** return
+identical HTTP `403` responses both for accesses to non-existent index files
+and for accesses to existing index files which are not for the user + app
+requesting it, so that an adversary (other user or other app) can't probe for
+index files to discover what apps the user might use.
+
+The method by which the tag vocabulary being used by a server is communicated
+to the user or to the user's trusted authorization management app is to be
+determined.
 
 To associate tags with a `Bearer` access token, the app sets the (new,
 experimental) `app_authorizations` key in the *proof-token* (sent to the
-`webid-pop` endpoint) to the URI of the App Authorization document appropriate
-for this server.
+`webid-pop` endpoint) to the URI of the App Authorization appropriate for
+this server.
 
 `auth.py`
 ---------
