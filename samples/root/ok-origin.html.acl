@@ -7,7 +7,7 @@
 	acl:excludeOrigin <https://bad.example>;
 
 	# an app hosted locally.
-	acl:origin        "@";
+	acl:origin        </>;
 
 	# any Origin/appID with this origin.
 	acl:origin        "https://app1.example" ;

@@ -548,8 +548,6 @@ class AuthResource(resource.Resource):
 				for each in aclGraph.objects(auth, ACL_ORIGIN):
 					if ("*" == unicode(each)) or (canonical_origin(each) == app_origin):
 						return True
-					if ("@" == unicode(each)) and (origin == app_origin):
-						return True
 				for each in aclGraph.objects(auth, ACL_APP):
 					if appid.startswith(each):
 						return True
@@ -1089,7 +1087,7 @@ class AuthResource(resource.Resource):
 		try:
 			app_authorization_uri = proof_claims.get(PROOF_TOKEN_APP_AUTHORIZATIONS)
 			if app_authorization_uri and any(map(lambda x: is_suburi(x, app_authorization_uri), card.objects(webid, ACL_APPAUTHORIZATIONS))):
-				authGraph = yield fetch_graph_cached_shared(app_authorization_uri)
+				authGraph = yield self.load_graph(app_authorization_uri)
 				for auth, server in authGraph.subject_objects(ACL_RESOURCESERVER):
 					if not any(map(lambda x: canonical_origin(x) == origin, authGraph.objects(server, ACL_ORIGIN))):
 						continue

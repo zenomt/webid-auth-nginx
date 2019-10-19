@@ -46,7 +46,7 @@ The server implements [Web Access Control][WAC] with several modifications:
       or the origin of the target URI;
     * `acl:origin` objects can be URIs or string literals;
     * `acl:origin` can be the special literal `"*"`, which matches all origins;
-    * `acl:origin` can be the special literal `"@"`, which matches the target URI's origin;
+    * `acl:origin` can be `</>`, which matches the target URI's origin;
   - `acl:app` for [application identifier][zenomt-auth] prefixes (only usable
     with [WebID Authorization Protocol][zenomt-auth] bearer tokens);
   - `acl:tag` for app tags/scopes. See [application tagging](#application-tagging)
