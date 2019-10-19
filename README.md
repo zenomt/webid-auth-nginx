@@ -106,14 +106,14 @@ for an `acl:Authorization` instead of an `acl:origin` or `acl:app`:
 	# read for all authenticated users who are using
 	# an app with a tag pattern that matches "Chat.Read".
 	[]
-		a acl:Authorization;
-		acl:mode acl:Read;
-		acl:agentClass acl:AuthenticatedAgent;
-		acl:accessToClass acl:Resource; # NB this is the default
+	    a acl:Authorization;
+	    acl:mode acl:Read;
+	    acl:agentClass acl:AuthenticatedAgent;
+	    acl:accessToClass acl:Resource; # NB this is the default
 
-		# apps the user has tagged "Chat.Read" or "Chat.*" or "*.Read" or
-		# "*" will be allowed.
-		acl:tag "Chat.Read";
+	    # apps the user has tagged "Chat.Read" or "Chat.*" or "*.Read" or
+	    # "*" will be allowed.
+	    acl:tag "Chat.Read";
 
 	    acl:default true .
 
@@ -139,13 +139,13 @@ realm `https://mike.example/auth/`:
 	@prefix acl: <http://www.w3.org/ns/auth/acl#> .
 	
 	<#it>
-		a acl:AppAuthorization;
-		acl:resourceServer [
-			acl:origin <https://mike.example>;
-			acl:realm "https://mike.example/auth/"
-		];
-		acl:app "https://app.example/oauth/code";
-		acl:tag "Photos.Read", "Chat.*" .
+	    a acl:AppAuthorization;
+	    acl:resourceServer [
+	        acl:origin <https://mike.example>;
+	        acl:realm "https://mike.example/auth/"
+	    ];
+	    acl:app "https://app.example/oauth/code";
+	    acl:tag "Photos.Read", "Chat.*" .
 
 Note that `auth.py` uses its base URL as its realm.
 
@@ -172,10 +172,10 @@ app, mapping between App Authorization URIs and resource servers:
 	@prefix acl: <http://www.w3.org/ns/auth/acl#> .
 
 	</wac/app-auth/b6d88441302c07700743b8d793ae2a8a.ttl#it>
-		acl:resourceServer [ acl:origin <https://mike.example>; acl:realm "https://mike.example/auth/" ] .
+	    acl:resourceServer [ acl:origin <https://mike.example>; acl:realm "https://mike.example/auth/" ] .
 
 	</wac/app-auth/4f20846c1179e604048a589583dd6f9c.ttl#it>
-		acl:resourceServer [ acl:origin <https://other.example>; acl:realm "Other Server" ] .
+	    acl:resourceServer [ acl:origin <https://other.example>; acl:realm "Other Server" ] .
 
 The non-listable container for App Authorization index files **SHOULD** return
 identical HTTP `403` responses both for accesses to non-existent index files
