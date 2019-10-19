@@ -179,13 +179,14 @@ app, mapping between App Authorization URIs and resource servers:
 
 The non-listable container for App Authorization index files **SHOULD** return
 identical HTTP `403` responses both for accesses to non-existent index files
-and for accesses to existing index files which are not for the user + app
+and for accesses to existing index files which are not for the user∙app
 requesting it, so that an adversary (other user or other app) can't probe for
 index files to discover what apps the user might use.
 
 The method by which the tag vocabulary being used by a server is communicated
 to the user or to the user's trusted authorization management app is to be
-determined.
+determined. It is envisioned that a method could integrate with the
+[HTTP Privilege Request Protocol][priv-proto].
 
 To associate tags with a `Bearer` access token, the app sets the (new,
 experimental) `app_authorizations` key in the *proof-token* (sent to the
@@ -448,3 +449,4 @@ any others for which this auth server is configured, for the next 180 seconds:
   [zenomt-auth]: https://github.com/zenomt/webid-auth-protocol
   [self-issued]: https://openid.net/specs/openid-connect-core-1_0.html#SelfIssued
   [realm]:       https://tools.ietf.org/html/rfc7235#section-2.2
+  [priv-proto]:  https://github.com/solid/authorization-and-access-control-panel/blob/master/privilege-request-protocol.md
