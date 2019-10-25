@@ -125,7 +125,7 @@ is entirely at the discretion of a resource owner. Tags **SHOULD** have the
 same meaning at least across resources in the same origin and [realm][].
 
 The user associates tag patterns for the combination of an app, resource
-server origin, and security realm (the name of the [protection space][realm];
+server origin, and optionally security realm (the name of the [protection space][realm];
 that is, the `realm` authentication parameter of the `WWW-Authenticate` HTTP
 response header) in an App Authorization document. Here is an example App
 Authorization document assigning tag patterns `Photos.Read` and `Chat.*` to
@@ -147,7 +147,14 @@ realm `https://mike.example/auth/`:
 	    acl:app "https://app.example/oauth/code";
 	    acl:tag "Photos.Read", "Chat.*" .
 
-Note that `auth.py` uses its base URL as its realm.
+If the `acl:resourceServer` specifies an `acl:realm` then it **MUST** match
+the server's realm exactly.  Note that `auth.py` uses its base URL as its
+realm.
+
+To support a default App Authorization, the `acl:resourceServer` can give the
+literal `"*"` for `acl:origin`, which matches all servers. However, a server
+**MUST** ignore any `acl:tag`s containing a wildcard character (`*` or `?`)
+if the server's origin is not in the `acl:resourceServer`.
 
 The URI for the App Authorization document **MUST** be in (at a sub-path of)
 an `acl:appAuthorizations` in the user's profile:

@@ -102,6 +102,8 @@ ACL_REALM              = rdflib.URIRef('http://www.w3.org/ns/auth/acl#realm')
 XSD_TRUE  = rdflib.term.Literal(True)
 XSD_FALSE = rdflib.term.Literal(False)
 
+WILDCARD_LITERAL = rdflib.term.Literal("*")
+
 DEFAULT_NS = {
 	"acl": rdflib.URIRef('http://www.w3.org/ns/auth/acl#'),
 	"foaf": rdflib.URIRef('http://xmlns.com/foaf/0.1/'),
@@ -1089,13 +1091,18 @@ class AuthResource(resource.Resource):
 			if app_authorization_uri and any(map(lambda x: is_suburi(x, app_authorization_uri), card.objects(webid, ACL_APPAUTHORIZATIONS))):
 				authGraph = yield self.load_graph(app_authorization_uri)
 				for auth, server in authGraph.subject_objects(ACL_RESOURCESERVER):
-					if not any(map(lambda x: canonical_origin(x) == origin, authGraph.objects(server, ACL_ORIGIN))):
+					wildcardOrigin = (server, ACL_ORIGIN, WILDCARD_LITERAL) in authGraph
+					forMyOrigin = any(map(lambda x: canonical_origin(x) == origin, authGraph.objects(server, ACL_ORIGIN)))
+					if (not wildcardOrigin) and (not forMyOrigin):
 						continue
-					if (server, ACL_REALM, realm) not in authGraph:
+					if ((server, ACL_REALM, None) in authGraph) and ((server, ACL_REALM, realm) not in authGraph):
 						continue
 					if any(map(lambda x: canonical_origin(x) == app_origin, authGraph.objects(auth, ACL_ORIGIN))) or \
 							any(map(lambda x: unicode(x).startswith(appid), authGraph.objects(auth, ACL_APP))):
-						rv.update(map(lambda x: unicode(x), authGraph.objects(auth, ACL_TAG)))
+						tags = map(lambda x: unicode(x), authGraph.objects(auth, ACL_TAG))
+						if not forMyOrigin:
+							tags = filter(lambda x: ('*' not in x) and ('?' not in x), tags)
+						rv.update(tags)
 		except Exception as e:
 			print "exception loading app tags (ignoring)"
 			print traceback.format_exc()

@@ -1,4 +1,5 @@
 @prefix acl: <http://www.w3.org/ns/auth/acl#> .
+@prefix tag: <https://vocab.example/ns#> .
 
 <#it>
 	a acl:AppAuthorization;
@@ -7,4 +8,6 @@
 		acl:realm "https://mike.example/auth/"
 	];
 	acl:app "https://app.example/oauth/code"; # NB the default app-id of client.py.
-	acl:tag "Photos.Read", "Chat.*" .
+	acl:tag "Photos.Read", # matches a resource tagged "Photos.Read" or "Photos.*" or "*.Read" or "*"
+	        "Chat.*",      # matches a resource tagged "Chat.anything" or "Chat.*" or "*"
+	        tag:Foo.Bar .  # this tag is a URI

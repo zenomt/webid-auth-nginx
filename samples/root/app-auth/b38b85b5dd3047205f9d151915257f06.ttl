@@ -1,0 +1,12 @@
+# a default App Authorization for app "https://app.example/oauth/code",
+# to use when there's no App Authorization for a specific server.
+
+@prefix acl: <http://www.w3.org/ns/auth/acl#> .
+
+<#it>
+	a acl:AppAuthorization;
+	acl:resourceServer [ acl:origin "*" ];    # matches any server
+	acl:app "https://app.example/oauth/code"; # NB the default app-id of client.py
+
+	acl:tag "Photos.Read",
+	        "Chat.*".      # this is ignored because the origin matched on "*"
