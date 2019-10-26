@@ -117,6 +117,9 @@
 	acl:ResourceServer a :Class;
 	  :comment "A web server, having an acl:origin and an acl:realm." .
 
+	acl:TagMode a :Class;
+	  :comment "A set of tags and the access modes to which they apply, having one or more acl:tag and one or more acl:mode" .
+
 	acl:origin :domain acl:ResourceServer . # also.
 
 	acl:realm a rdf:Property;
@@ -128,6 +131,11 @@
 	  :comment "The server to which this AppAuthorization applies";
 	  :domain acl:AppAuthorization;
 	  :range acl:ResourceServer .
+
+	acl:tagMode a rdf:Property;
+	  :comment "Tags and access modes for this AppAuthorization";
+	  :domain acl:AppAuthorization;
+	  :range acl:TagMode .
 
 	acl:tag :domain acl:AppAuthorization . # also.
 	acl:app :domain acl:AppAuthorization . # also.
