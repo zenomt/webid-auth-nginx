@@ -105,7 +105,8 @@ XSD_FALSE = rdflib.term.Literal(False)
 
 WILDCARD_LITERAL = rdflib.term.Literal("*")
 
-KNOWN_PERMISSIONS = [ACL_SEARCH, ACL_READ, ACL_WRITE, ACL_APPEND, ACL_CONTROL, ACL_OTHER]
+PERMISSION_FLAGS = { ACL_SEARCH: 1, ACL_WRITE: 2, ACL_READ: 4, ACL_APPEND: 16, ACL_CONTROL: 32, ACL_OTHER: 32768 }
+PERMISSION_CHARS = [(32768, 'o'), (32, 'c'), (16, 'a'), (4, 'r'), (2, 'w'), (1, 'x')]
 
 DEFAULT_NS = {
 	"acl": rdflib.URIRef('http://www.w3.org/ns/auth/acl#'),
@@ -128,6 +129,12 @@ METHODS_WRITE  = ["PUT", "POST", "DELETE", "PATCH", "PROPPATCH", "MKCOL", "COPY"
 METHODS_APPEND = ["PUT", "POST", "PATCH", "PROPPATCH", "MKCOL"]
 
 inf = float('inf')
+
+def pretty_perms(mode_mask):
+	rv = []
+	for flag, c in PERMISSION_CHARS:
+		rv.append(c if flag & mode_mask else '-')
+	return ''.join(rv)
 
 def ensure(v, msg=''):
 	if not v:
@@ -525,8 +532,7 @@ class AuthResource(resource.Resource):
 
 	@inlineCallbacks
 	def check_acl_for_perm(self, aclGraph, origin, webid, appid, app_origin, tagModes, permission, isDirectory, inherited=False):
-		permission_str = unicode(permission)
-		tags = set(map(lambda x: x['tag'], filter(lambda y: y['mode'] == permission_str, tagModes)))
+		tags = set(map(lambda x: x['tag'], filter(lambda y: y['mode_mask'] & PERMISSION_FLAGS.get(permission, 0), tagModes)))
 		def _filter_by_resource_type(authorizations):
 			if isDirectory and inherited:
 				resourceClasses = set((ACL_RESOURCE, ACL_CONTAINER, ACL_SUBRESOURCE, ACL_SUBCONTAINER))
@@ -1089,7 +1095,7 @@ class AuthResource(resource.Resource):
 		webid = rdflib.URIRef(webid)
 		app_origin = canonical_origin(appid)
 		realm = rdflib.term.Literal(args.url)
-		rv = set()
+		rv = {}
 		try:
 			app_authorization_uri = proof_claims.get(PROOF_TOKEN_APP_AUTHORIZATIONS)
 			if app_authorization_uri and any(map(lambda x: is_suburi(x, app_authorization_uri), card.objects(webid, ACL_APPAUTHORIZATIONS))):
@@ -1105,13 +1111,12 @@ class AuthResource(resource.Resource):
 							(not any(map(lambda x: unicode(x).startswith(appid), authGraph.objects(auth, ACL_APP)))):
 						continue
 					for tagMode in authGraph.objects(auth, ACL_TAGMODE):
+						mode_mask = reduce(lambda a, x: a | PERMISSION_FLAGS.get(x, 0), authGraph.objects(tagMode, ACL_MODE), 0)
 						for tag in authGraph.objects(tagMode, ACL_TAG):
 							tag = unicode(tag)
 							if (not forMyOrigin) and (('*' in tag) or ('?' in tag)):
 								continue
-							for mode in authGraph.objects(tagMode, ACL_MODE):
-								if mode in KNOWN_PERMISSIONS:
-									rv.add((unicode(mode), tag))
+							rv[tag] = rv.get(tag, 0) | mode_mask
 		except Exception as e:
 			print "exception loading app tags (ignoring)"
 			print traceback.format_exc()
@@ -1185,10 +1190,11 @@ class AuthResource(resource.Resource):
 				(token_expires_on, self.get_client_addr(request), access_token, webid, appid))
 			access_token_id = c.lastrowid
 
-			tags = []
-			for mode, tag in tagModes:
-				c.execute("INSERT INTO app_tag (access_token_id, mode, tag) VALUES (?, ?, ?)", (access_token_id, mode, tag))
-				tags.append(dict(tag=tag, mode=mode))
+			tags = {}
+			for tag, mode_mask in tagModes.items():
+				if mode_mask:
+					c.execute("INSERT INTO app_tag (access_token_id, tag, mode_mask) VALUES (?, ?, ?)", (access_token_id, tag, mode_mask))
+					tags[tag] = pretty_perms(mode_mask)
 
 			db.commit()
 
@@ -1327,8 +1333,8 @@ CREATE TABLE IF NOT EXISTS access_token (
 CREATE TABLE IF NOT EXISTS app_tag (
 	id              INTEGER PRIMARY KEY AUTOINCREMENT,
 	access_token_id INTEGER NOT NULL REFERENCES access_token(id) ON DELETE CASCADE,
-	mode            TEXT NOT NULL,
-	tag             TEXT NOT NULL
+	tag             TEXT NOT NULL,
+	mode_mask       INTEGER NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS app_tag_token ON app_tag ( access_token_id );
