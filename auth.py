@@ -105,8 +105,12 @@ XSD_FALSE = rdflib.term.Literal(False)
 
 WILDCARD_LITERAL = rdflib.term.Literal("*")
 
-PERMISSION_FLAGS = { ACL_SEARCH: 1, ACL_WRITE: 16 | 2, ACL_READ: 4, ACL_APPEND: 16, ACL_CONTROL: 32, ACL_OTHER: 32768 }
+PERMISSION_FLAGS = { ACL_SEARCH: 1, ACL_WRITE: 2, ACL_READ: 4, ACL_APPEND: 16, ACL_CONTROL: 32, ACL_OTHER: 32768 }
 PERMISSION_CHARS = [(32768, 'o'), (32, 'c'), (16, 'a'), (4, 'r'), (2, 'w'), (1, 'x')]
+
+# when making a token, ACL_WRITE includes ACL_APPEND
+PERMISSION_FLAGS_TOKEN = PERMISSION_FLAGS.copy()
+PERMISSION_FLAGS_TOKEN[ACL_WRITE] = PERMISSION_FLAGS[ACL_WRITE] | PERMISSION_FLAGS[ACL_APPEND]
 
 DEFAULT_NS = {
 	"acl": rdflib.URIRef('http://www.w3.org/ns/auth/acl#'),
@@ -130,11 +134,8 @@ METHODS_APPEND = ["PUT", "POST", "PATCH", "PROPPATCH", "MKCOL"]
 
 inf = float('inf')
 
-def pretty_perms(mode_mask):
-	rv = []
-	for flag, c in PERMISSION_CHARS:
-		rv.append(c if flag & mode_mask else '-')
-	return ''.join(rv)
+def expand_perms(mode_mask):
+	return map(lambda x: x[0], filter(lambda y: y[1] & mode_mask, PERMISSION_FLAGS.items()))
 
 def ensure(v, msg=''):
 	if not v:
@@ -570,6 +571,8 @@ class AuthResource(resource.Resource):
 			returnValue(self.PERM_OK)
 
 		authorizations = _filter_by_resource_type(aclGraph.subjects(ACL_MODE, permission))
+		if permission == ACL_APPEND:
+			authorizations.extend(_filter_by_resource_type(aclGraph.subjects(ACL_MODE, ACL_WRITE)))
 		anyAuths = bool(authorizations)
 
 		tags = tags or [NONE_APP_TAG]
@@ -1062,7 +1065,7 @@ class AuthResource(resource.Resource):
 			return self.send_answer(request, code=302, location=orig_url)
 		return self.send_answer(request, 'logged out')
 
-	def _send_token_answer(self, request, access_token=None, expires_in=None, error=None, error_description=None):
+	def _send_token_answer(self, request, access_token=None, expires_in=None, error=None, error_description=None, tags=None):
 		redirect_uri = qparam(request.args, 'redirect_uri')
 		state = qparam(request.args, 'state')
 		code = 400 if error else 200
@@ -1071,6 +1074,8 @@ class AuthResource(resource.Resource):
 			rv['access_token'] = access_token
 			rv['expires_in'] = expires_in
 			rv['token_type'] = 'Bearer'
+			if tags:
+				rv['x_tags'] = tags
 		if state:
 			rv['state'] = state
 		if error:
@@ -1111,7 +1116,7 @@ class AuthResource(resource.Resource):
 							(not any(map(lambda x: unicode(x).startswith(appid), authGraph.objects(auth, ACL_APP)))):
 						continue
 					for tagMode in authGraph.objects(auth, ACL_TAGMODE):
-						mode_mask = reduce(lambda a, x: a | PERMISSION_FLAGS.get(x, 0), authGraph.objects(tagMode, ACL_MODE), 0)
+						mode_mask = reduce(lambda a, x: a | PERMISSION_FLAGS_TOKEN.get(x, 0), authGraph.objects(tagMode, ACL_MODE), 0)
 						for tag in authGraph.objects(tagMode, ACL_TAG):
 							tag = unicode(tag)
 							if (not forMyOrigin) and (('*' in tag) or ('?' in tag)):
@@ -1194,12 +1199,12 @@ class AuthResource(resource.Resource):
 			for tag, mode_mask in tagModes.items():
 				if mode_mask:
 					c.execute("INSERT INTO app_tag (access_token_id, tag, mode_mask) VALUES (?, ?, ?)", (access_token_id, tag, mode_mask))
-					tags[tag] = pretty_perms(mode_mask)
+					tags[tag] = expand_perms(mode_mask)
 
 			db.commit()
 
 			print "issue token to: <%s> appid: <%s> lifetime: %s tags: %s" % (webid, appid, expires_in, json.dumps(tags))
-			returnValue(self._send_token_answer(request, access_token=access_token, expires_in=expires_in))
+			returnValue(self._send_token_answer(request, access_token=access_token, expires_in=expires_in, tags=tags))
 		except Exception as e:
 			print traceback.format_exc()
 			returnValue(self._send_token_answer(request, error="invalid_request", error_description=`e`))
