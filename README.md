@@ -104,16 +104,16 @@ for an `acl:Authorization` instead of an `acl:origin` or `acl:app`:
 
 	# ACL for a container of chat messages, allowing
 	# read for all authenticated users who are using
-	# an app with a tag pattern that matches "Chat.Read".
+	# an app with a tag pattern that matches "Chat.Public".
 	[]
 	    a acl:Authorization;
 	    acl:mode acl:Read;
 	    acl:agentClass acl:AuthenticatedAgent;
 	    acl:accessToClass acl:Resource; # NB this is the default
 
-	    # apps the user has tagged "Chat.Read" or "Chat.*" or "*.Read" or
-	    # "*" will be allowed.
-	    acl:tag "Chat.Read";
+	    # apps the user has tagged "Chat.Public" or "Chat.*" or "*.Public" or
+	    # "*" for acl:Read will be allowed.
+	    acl:tag "Chat.Public";
 
 	    acl:default true .
 
@@ -128,9 +128,9 @@ The user associates tag patterns for the combination of an app, resource
 server origin, and optionally security realm (the name of the [protection space][realm];
 that is, the `realm` authentication parameter of the `WWW-Authenticate` HTTP
 response header) in an App Authorization document. Here is an example App
-Authorization document assigning tag patterns `Photos.Read` and `Chat.*` to
+Authorization document assigning tag patterns `Photos.Public` and `Chat.*` to
 app `https://app.example/oauth/code` when accessing server `https://mike.example`'s
-realm `https://mike.example/auth/`:
+realm `https://mike.example/auth/` for modes `acl:Read` and `acl:Write`:
 
 	# this is world-readable but has an unguessable URI like
 	#     <https://mike.example/wac/app-auth/b6d88441302c07700743b8d793ae2a8a.ttl#it>
@@ -145,7 +145,10 @@ realm `https://mike.example/auth/`:
 	        acl:realm "https://mike.example/auth/"
 	    ];
 	    acl:app "https://app.example/oauth/code";
-	    acl:tag "Photos.Read", "Chat.*" .
+	    acl:tagMode [
+	        acl:tag "Photos.Public", "Chat.*";
+	        acl:mode acl:Read, acl:Write
+	    ] .
 
 If the `acl:resourceServer` specifies an `acl:realm` then it **MUST** match
 the server's realm exactly.  Note that `auth.py` uses its base URL as its

@@ -98,11 +98,14 @@ ACL_APPAUTHORIZATION   = rdflib.URIRef('http://www.w3.org/ns/auth/acl#AppAuthori
 ACL_APPAUTHORIZATIONS  = rdflib.URIRef('http://www.w3.org/ns/auth/acl#appAuthorizations')
 ACL_RESOURCESERVER     = rdflib.URIRef('http://www.w3.org/ns/auth/acl#resourceServer')
 ACL_REALM              = rdflib.URIRef('http://www.w3.org/ns/auth/acl#realm')
+ACL_TAGMODE            = rdflib.URIRef('http://www.w3.org/ns/auth/acl#tagMode')
 
 XSD_TRUE  = rdflib.term.Literal(True)
 XSD_FALSE = rdflib.term.Literal(False)
 
 WILDCARD_LITERAL = rdflib.term.Literal("*")
+
+KNOWN_PERMISSIONS = [ACL_SEARCH, ACL_READ, ACL_WRITE, ACL_APPEND, ACL_CONTROL, ACL_OTHER]
 
 DEFAULT_NS = {
 	"acl": rdflib.URIRef('http://www.w3.org/ns/auth/acl#'),
@@ -521,7 +524,9 @@ class AuthResource(resource.Resource):
 		return self.send_answer(request, 'not found', code=404)
 
 	@inlineCallbacks
-	def check_acl_for_perm(self, aclGraph, origin, webid, appid, app_origin, tags, permission, isDirectory, inherited=False):
+	def check_acl_for_perm(self, aclGraph, origin, webid, appid, app_origin, tagModes, permission, isDirectory, inherited=False):
+		permission_str = unicode(permission)
+		tags = set(map(lambda x: x['tag'], filter(lambda y: y['mode'] == permission_str, tagModes)))
 		def _filter_by_resource_type(authorizations):
 			if isDirectory and inherited:
 				resourceClasses = set((ACL_RESOURCE, ACL_CONTAINER, ACL_SUBRESOURCE, ACL_SUBCONTAINER))
@@ -611,7 +616,7 @@ class AuthResource(resource.Resource):
 		returnValue(self.PERM_NOTYOU)
 
 	@inlineCallbacks
-	def check_permission(self, method, uri, webid, appid, tags):
+	def check_permission(self, method, uri, webid, appid, tagModes):
 		location = find_location(uri) # { origin, prefix, root, base, path, query }
 		if not location:
 			raise ValueError("missing configuration for <%s>" % (uri, ))
@@ -637,13 +642,13 @@ class AuthResource(resource.Resource):
 			if posixpath.isfile(aclFilename):
 				cachedReadable = False
 				lastACL = load_local_graph_ext(aclFilename, aclURI, format='turtle')
-				reason = yield self.check_acl_for_perm(lastACL, origin, webid, appid, app_origin, tags, ACL_SEARCH, True)
+				reason = yield self.check_acl_for_perm(lastACL, origin, webid, appid, app_origin, tagModes, ACL_SEARCH, True)
 				if reason is not self.PERM_OK:
 					returnValue((reason, None))
 			elif not lastACL:
 				raise ValueError("missing root ACL (%s) <%s>?" % (aclFilename, aclURI))
 			elif not cachedReadable:
-				reason = yield self.check_acl_for_perm(lastACL, origin, webid, appid, app_origin, tags, ACL_SEARCH, True, inherited=True)
+				reason = yield self.check_acl_for_perm(lastACL, origin, webid, appid, app_origin, tagModes, ACL_SEARCH, True, inherited=True)
 				if reason is not self.PERM_OK:
 					returnValue((reason, None))
 				cachedReadable = True
@@ -664,7 +669,7 @@ class AuthResource(resource.Resource):
 			else:
 				using_inherited = True
 
-		check_for = lambda perm: self.check_acl_for_perm(lastACL, origin, webid, appid, app_origin, tags, perm, not leaf, inherited=using_inherited)
+		check_for = lambda perm: self.check_acl_for_perm(lastACL, origin, webid, appid, app_origin, tagModes, perm, not leaf, inherited=using_inherited)
 
 		if   need_control:
 			mode = ACL_CONTROL
@@ -693,8 +698,7 @@ class AuthResource(resource.Resource):
 			request.access_token_row = db.cursor().execute("SELECT * FROM access_token WHERE access_token = ?", (access_token, )).fetchone()
 			if request.access_token_row:
 				request.session_webid = request.access_token_row['webid']
-				tags = db.cursor().execute("SELECT * FROM app_tag WHERE access_token_id = ?", (request.access_token_row['id'], )).fetchall()
-				request.app_tags = map(lambda x: x['tag'], tags)
+				request.app_tags = db.cursor().execute("SELECT * FROM app_tag WHERE access_token_id = ?", (request.access_token_row['id'], )).fetchall()
 				return self.STATUS_OK
 			return self.STATUS_BAD_TOKEN
 
@@ -1097,12 +1101,17 @@ class AuthResource(resource.Resource):
 						continue
 					if ((server, ACL_REALM, None) in authGraph) and ((server, ACL_REALM, realm) not in authGraph):
 						continue
-					if any(map(lambda x: canonical_origin(x) == app_origin, authGraph.objects(auth, ACL_ORIGIN))) or \
-							any(map(lambda x: unicode(x).startswith(appid), authGraph.objects(auth, ACL_APP))):
-						tags = map(lambda x: unicode(x), authGraph.objects(auth, ACL_TAG))
-						if not forMyOrigin:
-							tags = filter(lambda x: ('*' not in x) and ('?' not in x), tags)
-						rv.update(tags)
+					if (not any(map(lambda x: canonical_origin(x) == app_origin, authGraph.objects(auth, ACL_ORIGIN)))) and \
+							(not any(map(lambda x: unicode(x).startswith(appid), authGraph.objects(auth, ACL_APP)))):
+						continue
+					for tagMode in authGraph.objects(auth, ACL_TAGMODE):
+						for tag in authGraph.objects(tagMode, ACL_TAG):
+							tag = unicode(tag)
+							if (not forMyOrigin) and (('*' in tag) or ('?' in tag)):
+								continue
+							for mode in authGraph.objects(tagMode, ACL_MODE):
+								if mode in KNOWN_PERMISSIONS:
+									rv.add((unicode(mode), tag))
 		except Exception as e:
 			print "exception loading app tags (ignoring)"
 			print traceback.format_exc()
@@ -1164,7 +1173,7 @@ class AuthResource(resource.Resource):
 			appid = proof_claims['iss']
 			appid = appid if ':' in appid else "unknown:"
 
-			tags = yield self.load_app_tags(proof_claims, card, webid, appid, canonical_origin(uri))
+			tagModes = yield self.load_app_tags(proof_claims, card, webid, appid, canonical_origin(uri))
 
 			now = long(time.time())
 			token_expires_on = long(max(now + args.min_token_lifetime, min(now + args.token_lifetime, proof_claims['exp'])))
@@ -1176,12 +1185,14 @@ class AuthResource(resource.Resource):
 				(token_expires_on, self.get_client_addr(request), access_token, webid, appid))
 			access_token_id = c.lastrowid
 
-			for tag in tags:
-				c.execute("INSERT INTO app_tag (access_token_id, tag) VALUES (?, ?)", (access_token_id, tag))
+			tags = []
+			for mode, tag in tagModes:
+				c.execute("INSERT INTO app_tag (access_token_id, mode, tag) VALUES (?, ?, ?)", (access_token_id, mode, tag))
+				tags.append(dict(tag=tag, mode=mode))
 
 			db.commit()
 
-			print "issue token to: <%s> appid: <%s> lifetime: %s tags: %s" % (webid, appid, expires_in, json.dumps(list(tags)))
+			print "issue token to: <%s> appid: <%s> lifetime: %s tags: %s" % (webid, appid, expires_in, json.dumps(tags))
 			returnValue(self._send_token_answer(request, access_token=access_token, expires_in=expires_in))
 		except Exception as e:
 			print traceback.format_exc()
@@ -1316,6 +1327,7 @@ CREATE TABLE IF NOT EXISTS access_token (
 CREATE TABLE IF NOT EXISTS app_tag (
 	id              INTEGER PRIMARY KEY AUTOINCREMENT,
 	access_token_id INTEGER NOT NULL REFERENCES access_token(id) ON DELETE CASCADE,
+	mode            TEXT NOT NULL,
 	tag             TEXT NOT NULL
 );
 
