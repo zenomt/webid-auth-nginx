@@ -111,6 +111,9 @@ PERMISSION_CHARS = [(32768, 'o'), (32, 'c'), (16, 'a'), (4, 'r'), (2, 'w'), (1, 
 # when making a token, ACL_WRITE includes ACL_APPEND
 PERMISSION_FLAGS_TOKEN = PERMISSION_FLAGS.copy()
 PERMISSION_FLAGS_TOKEN[ACL_WRITE] = PERMISSION_FLAGS[ACL_WRITE] | PERMISSION_FLAGS[ACL_APPEND]
+# and any flag implies ACL_SEARCH
+for k in PERMISSION_FLAGS_TOKEN:
+	PERMISSION_FLAGS_TOKEN[k] |= PERMISSION_FLAGS[ACL_SEARCH]
 
 DEFAULT_NS = {
 	"acl": rdflib.URIRef('http://www.w3.org/ns/auth/acl#'),
