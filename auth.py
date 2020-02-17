@@ -106,7 +106,6 @@ XSD_FALSE = rdflib.term.Literal(False)
 WILDCARD_LITERAL = rdflib.term.Literal("*")
 
 PERMISSION_FLAGS = { ACL_SEARCH: 1, ACL_WRITE: 2, ACL_READ: 4, ACL_APPEND: 16, ACL_CONTROL: 32, ACL_OTHER: 32768 }
-PERMISSION_CHARS = [(32768, 'o'), (32, 'c'), (16, 'a'), (4, 'r'), (2, 'w'), (1, 'x')]
 
 # when making a token, ACL_WRITE includes ACL_APPEND
 PERMISSION_FLAGS_TOKEN = PERMISSION_FLAGS.copy()

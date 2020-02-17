@@ -64,7 +64,7 @@ The server implements [Web Access Control][WAC] with several modifications:
       whose Access Control Resource this is;
     * `acl:SubContainer` - the class of all containers excluding the one whose
       Access Control Resource this is.
-  - `acl:excludeAgent` and `acl:excludeAgentClass` predicates to exclude agent(s)
+  - `acl:excludeAgent` and `acl:excludeAgentGroup` predicates to exclude agent(s)
     from an `acl:Authorization` even if otherwise allowed;
   - `acl:excludeOrigin` predicate to exclude an effective request origin even if
     otherwise allowed;
