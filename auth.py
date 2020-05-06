@@ -756,7 +756,7 @@ class AuthResource(resource.Resource):
 				if not request.auth_cookie:
 					www_authenticate.append('error="invalid_token"')
 			if 401 == code:
-				www_authenticate.append('webid_pop_endpoint="%s"' % (args.url + self.WEBID_POP, ))
+				www_authenticate.append('token_pop_endpoint="%s"' % (args.url + self.WEBID_POP, ))
 				www_authenticate.append('nonce="%s"' % (self.make_token_challenge(uri, request), ))
 				other_headers.append(('WWW-Authenticate', ", ".join(www_authenticate)))
 			return self.send_answer(request, code=code, other_headers=other_headers)
@@ -1136,8 +1136,8 @@ class AuthResource(resource.Resource):
 		proof_token = qparam(params, 'proof_token')
 		try:
 			proof_claims = jwt.get_unverified_claims(proof_token)
-			ensure(all([proof_claims[i] for i in ["aud", "nonce", "id_token", "iss", "exp"]]))
-			id_token = proof_claims['id_token']
+			ensure(all([proof_claims[i] for i in ["aud", "nonce", "token", "iss"]]))
+			id_token = proof_claims['token']
 			id_token_claims = jwt.get_unverified_claims(id_token)
 			ensure(all([id_token_claims[i] for i in ["aud", "exp", "cnf", "sub", "iss"]]))
 			proof_key = id_token_claims['cnf']['jwk']
@@ -1152,8 +1152,9 @@ class AuthResource(resource.Resource):
 			jws.verify(proof_token, proof_key, algorithms=trusted_algorithms)
 			self.ensure_audience_member(id_token_claims, proof_claims['iss'], check_azp=False)
 			now = time.time()
-			ensure(proof_claims['exp'] > now, "proof_token expired")
-			ensure(proof_claims['exp'] <= id_token_claims['exp'], "proof_token expires after id_token")
+			if proof_claims.has_key('exp'):
+				ensure(proof_claims['exp'] > now, "proof_token expired")
+				ensure(proof_claims['exp'] <= id_token_claims['exp'], "proof_token expires after id_token")
 
 			c = db.cursor()
 			challenge_row = c.execute("SELECT * FROM token_challenge WHERE nonce = ?", (proof_claims['nonce'], )).fetchone()

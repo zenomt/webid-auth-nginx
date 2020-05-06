@@ -10,7 +10,7 @@ to work in other environments. Additionally it provides endpoints and default
 pages to allow a user to log in with their WebID-OIDC credentials.
 
 The server provides a `webid-pop` HTTP endpoint that serves as the reference
-implementation for the `webid_pop_endpoint` API described in
+implementation for the `token_pop_endpoint` API described in
 [WebID HTTP Authorization Protocol][zenomt-auth].
 
 The server can be used to provide authorization and access control to files
@@ -225,7 +225,7 @@ The server exposes the following endpoints below its base URL:
   - `code` -- Handler for the OIDC `authorization_code` redirect
   - `refresh` -- Handler for the stale session reauthentication page
   - `logout` -- Handler for the "log out and try again with a different provider" page
-  - `webid-pop` -- The `webid_pop_endpoint` of
+  - `webid-pop` -- The `token_pop_endpoint` of
     [WebID HTTP Authorization Protocol][zenomt-auth]; see that document
     for a description of this endpoint's API
 
@@ -293,7 +293,7 @@ re-writing is needed. See the configuration below.
     includes this response header with a `401` response to the client, so it
     doesn't need to be manually configured. This header includes parameters
     for [WebID HTTP Authorization Protocol][zenomt-auth] including a challenge
-    `nonce` and the `webid_pop_endpoint` URI.
+    `nonce` and the `token_pop_endpoint` URI.
 
 ### Configuration
 

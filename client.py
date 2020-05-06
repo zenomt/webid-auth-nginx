@@ -102,7 +102,7 @@ def make_proof_token(id_token, aud, nonce, issuer, lifetime):
 	token = {
 		"aud": aud,
 		"nonce": nonce,
-		"id_token": id_token,
+		"token": id_token,
 		"iss": issuer,
 		"iat": long(now),
 		"exp": long(now + lifetime),
@@ -130,7 +130,7 @@ if response.getcode() != 401:
 	raise SystemExit(-1)
 
 www_auth = www_authenticate.parse(response.headers['WWW-Authenticate'])['Bearer']
-if not all([x in www_auth for x in ['nonce', 'scope', 'webid_pop_endpoint']]) or \
+if not all([x in www_auth for x in ['nonce', 'scope', 'token_pop_endpoint']]) or \
 		not all([x in www_auth['scope'].split() for x in ['openid', 'webid']]):
 	print "oops, WWW-Authenticate isn't for webid-auth-protocol", response.headers['WWW-Authenticate']
 	raise SystemExit(-1)
@@ -144,7 +144,7 @@ proof_token = make_proof_token(id_token=id_token, aud=uri, nonce=www_auth['nonce
 if args.debug:
 	print "proof token", proof_token
 
-pop_endpoint = urlparse.urljoin(uri, www_auth['webid_pop_endpoint'])
+pop_endpoint = urlparse.urljoin(uri, www_auth['token_pop_endpoint'])
 
 response = open_url(pop_endpoint, data=dict(proof_token=proof_token))
 if 200 != response.getcode():
