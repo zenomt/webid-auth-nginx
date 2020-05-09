@@ -58,6 +58,7 @@ from twisted.web.http_headers import Headers
 
 RANDOM_TOKEN_LENGTH = 30
 PROOF_TOKEN_APP_AUTHORIZATIONS = "app_authorizations"
+MAX_APP_AUTHORIZATION_URIS = 4
 
 NONE_TAG     = binascii.hexlify(os.urandom(RANDOM_TOKEN_LENGTH))
 NONE_APP_TAG = NONE_TAG + "-app"
@@ -245,6 +246,12 @@ SELECT ?exponent ?modulus WHERE {
 		n = b64u_encode(n_bytes)
 		keys.append(dict(e=e, n=n, kty="RSA"))
 	return dict(keys=keys)
+
+def get_claim_list(claims, key, default=None):
+	if claims.has_key(key):
+		rv = claims[key]
+		return rv if isinstance(rv, list) else [unicode(rv)]
+	return default
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-p', '--port', type=int, default=8080, help='listen on port (default %(default)s)')
@@ -1103,30 +1110,31 @@ class AuthResource(resource.Resource):
 		app_origin = canonical_origin(appid)
 		realm = rdflib.term.Literal(args.url)
 		rv = {}
-		try:
-			app_authorization_uri = proof_claims.get(PROOF_TOKEN_APP_AUTHORIZATIONS)
-			if app_authorization_uri and any(map(lambda x: is_suburi(x, app_authorization_uri), card.objects(webid, ACL_APPAUTHORIZATIONS))):
-				authGraph = yield self.load_graph(app_authorization_uri)
-				for auth, server in authGraph.subject_objects(ACL_RESOURCESERVER):
-					wildcardOrigin = (server, ACL_ORIGIN, WILDCARD_LITERAL) in authGraph
-					forMyOrigin = any(map(lambda x: canonical_origin(x) == origin, authGraph.objects(server, ACL_ORIGIN)))
-					if (not wildcardOrigin) and (not forMyOrigin):
-						continue
-					if ((server, ACL_REALM, None) in authGraph) and ((server, ACL_REALM, realm) not in authGraph):
-						continue
-					if (not any(map(lambda x: canonical_origin(x) == app_origin, authGraph.objects(auth, ACL_ORIGIN)))) and \
-							(not any(map(lambda x: unicode(x).startswith(appid), authGraph.objects(auth, ACL_APP)))):
-						continue
-					for tagMode in authGraph.objects(auth, ACL_TAGMODE):
-						mode_mask = reduce(lambda a, x: a | PERMISSION_FLAGS_TOKEN.get(x, 0), authGraph.objects(tagMode, ACL_MODE), 0)
-						for tag in authGraph.objects(tagMode, ACL_TAG):
-							tag = unicode(tag)
-							if (not forMyOrigin) and (('*' in tag) or ('?' in tag)):
-								continue
-							rv[tag] = rv.get(tag, 0) | mode_mask
-		except Exception as e:
-			print "exception loading app tags (ignoring)"
-			print traceback.format_exc()
+		app_authorization_uris = get_claim_list(proof_claims, PROOF_TOKEN_APP_AUTHORIZATIONS, [])[:MAX_APP_AUTHORIZATION_URIS]
+		for app_authorization_uri in app_authorization_uris:
+			try:
+				if any(map(lambda x: is_suburi(x, app_authorization_uri), card.objects(webid, ACL_APPAUTHORIZATIONS))):
+					authGraph = yield self.load_graph(app_authorization_uri)
+					for auth, server in authGraph.subject_objects(ACL_RESOURCESERVER):
+						wildcardOrigin = (server, ACL_ORIGIN, WILDCARD_LITERAL) in authGraph
+						forMyOrigin = any(map(lambda x: canonical_origin(x) == origin, authGraph.objects(server, ACL_ORIGIN)))
+						if (not wildcardOrigin) and (not forMyOrigin):
+							continue
+						if ((server, ACL_REALM, None) in authGraph) and ((server, ACL_REALM, realm) not in authGraph):
+							continue
+						if (not any(map(lambda x: canonical_origin(x) == app_origin, authGraph.objects(auth, ACL_ORIGIN)))) and \
+								(not any(map(lambda x: unicode(x).startswith(appid), authGraph.objects(auth, ACL_APP)))):
+							continue
+						for tagMode in authGraph.objects(auth, ACL_TAGMODE):
+							mode_mask = reduce(lambda a, x: a | PERMISSION_FLAGS_TOKEN.get(x, 0), authGraph.objects(tagMode, ACL_MODE), 0)
+							for tag in authGraph.objects(tagMode, ACL_TAG):
+								tag = unicode(tag)
+								if (not forMyOrigin) and (('*' in tag) or ('?' in tag)):
+									continue
+								rv[tag] = rv.get(tag, 0) | mode_mask
+			except Exception as e:
+				print "exception loading app tags (ignoring)"
+				print traceback.format_exc()
 		returnValue(rv)
 
 	@inlineCallbacks

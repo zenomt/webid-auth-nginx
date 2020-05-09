@@ -24,7 +24,7 @@ parser.add_argument('-a', '--app-id', default="https://app.example/oauth/code",
 parser.add_argument('-i', '--issuer', default="https://self-issued.me",
 	help="id_token issuer (default %(default)s)")
 parser.add_argument('-K', '--key-id', help="JWK kid (default %(default)s)")
-parser.add_argument('-A', '--app-auth', help="app authorizations URI")
+parser.add_argument('-A', '--app-auth', help="app authorizations URI (use multiple times)", action='append')
 parser.add_argument('-t', '--token-only', action='store_true',
 	help="output the bare access token instead of the full JSON response")
 parser.add_argument('-d', '--debug', action='store_true')
@@ -109,7 +109,7 @@ def make_proof_token(id_token, aud, nonce, issuer, lifetime):
 		"jti": str(uuid.uuid4())
 	}
 	if args.app_auth:
-		token['app_authorizations'] = args.app_auth
+		token['app_authorizations'] = args.app_auth[0] if len(args.app_auth) == 1 else args.app_auth
 	return make_jwt(token)
 
 uri = urlparse.urldefrag(args.uri)[0]
