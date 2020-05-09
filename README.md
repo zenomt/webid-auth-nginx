@@ -96,8 +96,8 @@ The following permission modes are required to satisfy the following accesses:
 
 ### Application Tagging
 
-As a proof-of-concept, the server implements an experimental method for letting
-the user control the scopes for which an application she is using has permission.
+The server implements a [proposed method][tags] for letting the user control
+the scopes for which an application she is using has permission.
 
 The resource owner/controller can specify one or more tag patterns (scopes)
 for an `acl:Authorization` instead of an `acl:origin` or `acl:app`:
@@ -195,13 +195,13 @@ index files to discover what apps the user might use.
 
 The method by which the tag vocabulary being used by a server is communicated
 to the user or to the user's trusted authorization management app is to be
-determined. It is envisioned that a method could integrate with the
-[HTTP Privilege Request Protocol][priv-proto].
+determined.
 
-To associate tags with a `Bearer` access token, the app sets the (new,
-experimental) `app_authorizations` key in the *proof-token* (sent to the
-`webid-pop` endpoint) to the URI of the App Authorization appropriate for
-this server.
+To associate tags with a `Bearer` access token, the app sets the new
+`app_authorizations` claim in the *proof-token* (sent to the `webid-pop`
+endpoint) to the URI(s) of the App Authorization(s) appropriate for this
+server. The claim can either be a string (for one URI) or a list of strings
+(for multiple URIs). The server will load at most four App Authorization URIs.
 
 `auth.py`
 ---------
@@ -435,7 +435,7 @@ Add your RSA public key and self-issuer URI to your WebID profile:
 Now you're ready to get an access token. Using the example configuration from
 above and the [samples](samples) directory:
 
-	$ python client.py -k data/client-private.pem -w 'https://mike.example/card.ttl#me' https://mike.example/wac/check.html -A https://mike.example/wac/app-auth/b6d88441302c07700743b8d793ae2a8a.ttl
+	$ python client.py -k data/client-private.pem -w 'https://mike.example/card.ttl#me' https://mike.example/wac/check.html -A https://mike.example/wac/app-auth/b6d88441302c07700743b8d793ae2a8a.ttl#it
 	{
 	    "access_token": "a0wBCgJajBtKX2PZ1-Uy6ATW2unYMeFxqyAXoV12",
 	    "token_type": "Bearer",
@@ -460,3 +460,4 @@ any others for which this auth server is configured, for the next 180 seconds:
   [self-issued]: https://openid.net/specs/openid-connect-core-1_0.html#SelfIssued
   [realm]:       https://tools.ietf.org/html/rfc7235#section-2.2
   [priv-proto]:  https://github.com/solid/authorization-and-access-control-panel/blob/master/privilege-request-protocol.md
+  [tags]:        https://github.com/solid/authorization-and-access-control-panel/blob/master/Proposals/ReplaceTrustedAppsWithTags.md

@@ -1115,7 +1115,8 @@ class AuthResource(resource.Resource):
 			try:
 				if any(map(lambda x: is_suburi(x, app_authorization_uri), card.objects(webid, ACL_APPAUTHORIZATIONS))):
 					authGraph = yield self.load_graph(app_authorization_uri)
-					for auth, server in authGraph.subject_objects(ACL_RESOURCESERVER):
+					auth = rdflib.URIRef(app_authorization_uri)
+					for server in authGraph.objects(auth, ACL_RESOURCESERVER):
 						wildcardOrigin = (server, ACL_ORIGIN, WILDCARD_LITERAL) in authGraph
 						forMyOrigin = any(map(lambda x: canonical_origin(x) == origin, authGraph.objects(server, ACL_ORIGIN)))
 						if (not wildcardOrigin) and (not forMyOrigin):
