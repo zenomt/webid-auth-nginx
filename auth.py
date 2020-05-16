@@ -1145,8 +1145,8 @@ class AuthResource(resource.Resource):
 		proof_token = qparam(params, 'proof_token')
 		try:
 			proof_claims = jwt.get_unverified_claims(proof_token)
-			ensure(all([proof_claims[i] for i in ["aud", "nonce", "token", "iss"]]))
-			id_token = proof_claims['token']
+			ensure(all([proof_claims[i] for i in ["aud", "nonce", "sub", "iss"]]))
+			id_token = proof_claims['sub']
 			id_token_claims = jwt.get_unverified_claims(id_token)
 			ensure(all([id_token_claims[i] for i in ["aud", "exp", "cnf", "sub", "iss"]]))
 			proof_key = id_token_claims['cnf']['jwk']

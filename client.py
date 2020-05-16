@@ -102,7 +102,7 @@ def make_proof_token(id_token, aud, nonce, issuer, lifetime):
 	token = {
 		"aud": aud,
 		"nonce": nonce,
-		"token": id_token,
+		"sub": id_token,
 		"iss": issuer,
 		"iat": long(now),
 		"exp": long(now + lifetime),
