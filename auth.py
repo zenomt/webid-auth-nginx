@@ -263,9 +263,9 @@ parser.add_argument('-c', '--config-file', default='./data/config.json',
 	help='configuration file (default %(default)s)')
 parser.add_argument('--docroot', default='./www',
 	help='base directory for simple file server (default %(default)s)')
-parser.add_argument('-l', '--session-lifetime', help="lifetime for sessions (default %(default)s)", default=86400)
-parser.add_argument('-t', '--token-lifetime', help="lifetime for access tokens (default %(default)s)", default=1800)
-parser.add_argument('-m', '--min-token-lifetime', help="minimum lifetime for access tokens (default %(default)s)", default=180)
+parser.add_argument('-l', '--session-lifetime', type=int, help="lifetime for sessions (default %(default)s)", default=86400)
+parser.add_argument('-t', '--token-lifetime', type=int, help="lifetime for access tokens (default %(default)s)", default=1800)
+parser.add_argument('-m', '--min-token-lifetime', type=int, help="minimum lifetime for access tokens (default %(default)s)", default=180)
 parser.add_argument('-i', '--cleanup-interval', type=float, default=10.,
 	help="interval between database cleanup runs (default %(default).3f)")
 parser.add_argument('-r', '--max-refreshes', default=1, type=int,
