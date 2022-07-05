@@ -1,5 +1,0 @@
-<#1>
-	a              acl:Authorization;
-	acl:agentClass acl:AuthenticatedAgent;
-	acl:mode       acl:Read;
-	acl:origin     "*".

@@ -1,9 +1,0 @@
-# you must be logged in to access this directory or anything in it, no matter
-# what other ACLs apply to contained files or subdirectories.
-
-<#1>
-	a              acl:Authorization;
-	acl:agentClass acl:AuthenticatedAgent;
-	acl:mode       acl:Read, acl:Search;
-	acl:origin     "*";
-	acl:default    true .
