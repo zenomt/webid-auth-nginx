@@ -131,7 +131,7 @@ DEFAULT_NS_TTL = """
 @prefix vcard: <http://www.w3.org/2006/vcard/ns#> .
 """
 
-METHODS_READ   = ["OPTIONS", "GET", "HEAD", "TRACE", "PROPFIND"]
+METHODS_READ   = ["OPTIONS", "GET", "QUERY", "HEAD", "TRACE", "PROPFIND", "SEARCH"]
 METHODS_WRITE  = ["PUT", "POST", "DELETE", "PATCH", "PROPPATCH", "MKCOL", "COPY", "MOVE", "LOCK", "UNLOCK"]
 METHODS_APPEND = ["PUT", "POST", "PATCH", "PROPPATCH", "MKCOL"]
 

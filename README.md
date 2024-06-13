@@ -85,7 +85,8 @@ The following permission modes are required to satisfy the following accesses:
   - `acl:Search` on a directory/container for any resource in that container;
   - `acl:Control` for any access to a resource whose URL path part ends
     with the ACL suffix (by default `.acl`);
-  - `acl:Read` for methods `OPTIONS`, `GET`, `HEAD`, `TRACE`, `PROPFIND`;
+  - `acl:Read` for methods `OPTIONS`, `GET`, `QUERY`, `HEAD`, `TRACE`, `PROPFIND`,
+    `SEARCH`;
   - `acl:Read` for the above read methods on an ACL resource if `acl:Control`
     isn't granted;
   - `acl:Write` for methods `PUT`, `POST`, `DELETE`, `PATCH`, `PROPPATCH`,
